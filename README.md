@@ -226,9 +226,10 @@ configure um `JWT_SECRET` seguro e restrinja CORS antes do uso real.
   teste. Sem ativação explícita, a cotação permanece como “Consultar valor”.
 - Preparação de publicação: a pasta ativa ainda não possui metadados Git. É
   necessário conectá-la ao repositório autorizado. O remoto existente foi
-  confirmado vazio, então a primeira publicação exige criar e enviar o commit
-  inicial. Também é necessário definir os domínios finais da Vercel/Render;
-  nenhum commit, push ou deploy foi feito, e a produção segue intacta.
+  confirmado vazio; o commit inicial foi criado localmente, mas o push foi
+  recusado por falta de permissão no GitHub. Também é necessário definir os
+  domínios finais da Vercel/Render. Nenhum deploy foi feito, e a produção segue
+  intacta.
 - Confirmar/configurar credenciais do WhatsApp Business, webhook público HTTPS
   e CORS no domínio de produção.
 - Publicar a versão consolidada em um repositório e conectar os serviços de
