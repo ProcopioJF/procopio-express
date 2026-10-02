@@ -1,0 +1,5 @@
+ALTER TABLE "Order" ADD COLUMN "requesterName" TEXT;
+
+ALTER TABLE "Notification"
+ADD COLUMN "status" TEXT NOT NULL DEFAULT 'PENDING',
+ADD COLUMN "error" TEXT;

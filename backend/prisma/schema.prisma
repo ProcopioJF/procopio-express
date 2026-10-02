@@ -1,0 +1,466 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+enum RoleName {
+  ADMIN
+  COMPANY
+  COURIER
+}
+enum OrderStatus {
+  PENDING
+  FINALIZED
+  CONFIRMED
+  ASSIGNED
+  PICKED_UP
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+enum NotificationChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+  PUSH
+}
+enum CompanyPermission {
+  ADMIN
+  STANDARD
+  RESTRICTED
+}
+enum FinancialEntryType {
+  INCOME
+  EXPENSE
+}
+enum PricingType {
+  FIXED
+  RANGE
+  PER_KM
+  QUOTE
+}
+enum SalesLeadStage {
+  LEAD
+  QUALIFIED
+  PROPOSAL
+  CLOSED_WON
+  CLOSED_LOST
+}
+enum SubscriptionStatus {
+  ACTIVE
+  OVERDUE
+  INACTIVE
+}
+
+model Role {
+  id String @id @default(cuid())
+  name RoleName @unique
+  users User[]
+  createdAt DateTime @default(now())
+}
+model User {
+  id String @id @default(cuid())
+  name String
+  email String @unique
+  phone String?
+  passwordHash String?
+  supabaseAuthId String? @unique @db.Uuid @map("supabase_auth_id")
+  roleId String
+  role Role @relation(fields: [roleId], references: [id])
+  companyId String?
+  company Company? @relation(fields: [companyId], references: [id])
+  companyPermission CompanyPermission @default(STANDARD)
+  isActive Boolean @default(true)
+  courier Courier?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ordersCreated Order[] @relation("CreatedOrders")
+  auditLogs AuditLog[]
+}
+model Company {
+  id String @id @default(cuid())
+  name String
+  document String? @unique
+  phone String?
+  email String?
+  address Json?
+  intelligenceEnabled Boolean @default(true) @map("intelligence_enabled")
+  users User[]
+  customers Customer[]
+  orders Order[]
+  branches CompanyBranch[]
+  costCenters CompanyCostCenter[]
+  subscriptions Subscription[]
+  financialEntries FinancialEntry[]
+  companyPatterns CompanyPattern[]
+  insights IntelligenceInsight[]
+  companyMemory CompanyMemory?
+  aiFeedback AiFeedback[]
+  aiUsageLogs AiUsageLog[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model Customer {
+  id String @id @default(cuid())
+  name String
+  phone String?
+  email String?
+  address Json?
+  companyId String
+  company Company @relation(fields: [companyId], references: [id])
+  orders Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model Courier {
+  id String @id @default(cuid())
+  userId String @unique
+  user User @relation(fields: [userId], references: [id])
+  vehicle Json?
+  active Boolean @default(true)
+  orders Order[]
+  createdAt DateTime @default(now())
+}
+model PricingZone {
+  id String @id @default(cuid())
+  name String
+  postalCodePrefix String?
+  basePrice Decimal @db.Decimal(10,2)
+  active Boolean @default(true)
+  orders Order[]
+  createdAt DateTime @default(now())
+}
+model PricingRoute {
+  id String @id @default(cuid())
+  city String @default("Juiz de Fora")
+  pickupNeighborhood String
+  deliveryNeighborhood String
+  price Decimal @db.Decimal(10,2)
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders Order[]
+  @@unique([city, pickupNeighborhood, deliveryNeighborhood])
+  @@index([active, city])
+}
+model PriceTable {
+  id String @id @default(cuid())
+  name String
+  description String?
+  active Boolean @default(true)
+  origins PriceTableOrigin[]
+  destinations PriceTableDestination[]
+  orders Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model PriceTableOrigin {
+  id String @id @default(cuid())
+  priceTableId String
+  priceTable PriceTable @relation(fields: [priceTableId], references: [id], onDelete: Cascade)
+  originName String
+  normalizedOriginName String @unique
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([priceTableId, active])
+}
+model PriceTableDestination {
+  id String @id @default(cuid())
+  priceTableId String
+  priceTable PriceTable @relation(fields: [priceTableId], references: [id], onDelete: Cascade)
+  destinationName String
+  normalizedDestinationName String
+  pricingType PricingType
+  fixedPrice Decimal? @db.Decimal(10,2)
+  minimumPrice Decimal? @db.Decimal(10,2)
+  maximumPrice Decimal? @db.Decimal(10,2)
+  perKmRate Decimal? @db.Decimal(10,2)
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([priceTableId, normalizedDestinationName], map: "PriceTableDestination_priceTableId_normalizedDestinationName_ke")
+  @@index([priceTableId, active])
+}
+model CompanyBranch {
+  id String @id @default(cuid())
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name String
+  phone String?
+  address Json?
+  isActive Boolean @default(true)
+  orders Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+}
+model CompanyCostCenter {
+  id String @id @default(cuid())
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name String
+  code String?
+  isActive Boolean @default(true)
+  orders Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("CostCenter")
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+}
+model Order {
+  id String @id @default(cuid())
+  publicId String @unique @default(cuid())
+  trackingToken String @unique @default(cuid())
+  status OrderStatus @default(PENDING)
+  pickupAddress Json
+  deliveryAddress Json
+  pickupCep String?
+  pickupStreet String?
+  pickupNumber String?
+  pickupNeighborhood String?
+  pickupComplement String?
+  pickupCity String?
+  pickupState String?
+  deliveryCep String?
+  deliveryStreet String?
+  deliveryNumber String?
+  deliveryNeighborhood String?
+  deliveryComplement String?
+  deliveryCity String?
+  deliveryState String?
+  pickupLatitude Float?
+  pickupLongitude Float?
+  deliveryLatitude Float?
+  deliveryLongitude Float?
+  distance Float?
+  perKmRate Decimal? @db.Decimal(10,2)
+  estimatedDuration Int?
+  routePolyline String?
+  recipientName String
+  recipientPhone String?
+  requesterName String?
+  requesterPhone String?
+  notes String?
+  price Decimal? @db.Decimal(10,2)
+  pricingType PricingType?
+  originNeighborhood String?
+  destinationNeighborhood String?
+  appliedPrice Decimal? @db.Decimal(10,2)
+  minimumPrice Decimal? @db.Decimal(10,2)
+  maximumPrice Decimal? @db.Decimal(10,2)
+  priceTableName String?
+  priceTableId String?
+  priceTable PriceTable? @relation(fields: [priceTableId], references: [id])
+  companyId String?
+  company Company? @relation(fields: [companyId], references: [id])
+  branchId String?
+  branch CompanyBranch? @relation(fields: [branchId], references: [id])
+  costCenterId String?
+  costCenter CompanyCostCenter? @relation(fields: [costCenterId], references: [id])
+  customerId String?
+  customer Customer? @relation(fields: [customerId], references: [id])
+  courierId String?
+  courier Courier? @relation(fields: [courierId], references: [id])
+  pricingZoneId String?
+  pricingZone PricingZone? @relation(fields: [pricingZoneId], references: [id])
+  pricingRouteId String?
+  pricingRoute PricingRoute? @relation(fields: [pricingRouteId], references: [id])
+  createdById String?
+  createdBy User? @relation("CreatedOrders", fields: [createdById], references: [id])
+  history OrderStatusHistory[]
+  notifications Notification[]
+  whatsappRequests WhatsAppRequest[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isSeed Boolean @default(false) @map("is_seed")
+  @@index([companyId, status])
+  @@index([branchId])
+  @@index([costCenterId])
+}
+model Lead {
+  id String @id @default(cuid())
+  companyName String
+  contactName String
+  email String?
+  phone String?
+  city String?
+  source String?
+  stage SalesLeadStage @default(LEAD)
+  estimatedMonthlyRevenue Decimal? @db.Decimal(10,2)
+  notes String?
+  followUpAt DateTime?
+  createdById String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([stage, updatedAt])
+  @@map("SalesLead")
+}
+model Plan {
+  id String @id @default(cuid())
+  name String @unique
+  description String?
+  monthlyPrice Decimal @db.Decimal(10,2)
+  annualPrice Decimal @db.Decimal(10,2)
+  monthlyOrderLimit Int?
+  isActive Boolean @default(true)
+  subscriptions Subscription[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("SubscriptionPlan")
+}
+model Subscription {
+  id String @id @default(cuid())
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  planId String
+  plan Plan @relation(fields: [planId], references: [id])
+  status SubscriptionStatus @default(ACTIVE)
+  monthlyPrice Decimal @db.Decimal(10,2)
+  startedAt DateTime @default(now())
+  renewalAt DateTime?
+  endedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([companyId, status])
+  @@index([status, renewalAt])
+}
+model FinancialEntry {
+  id String @id @default(cuid())
+  type FinancialEntryType
+  description String
+  category String
+  amount Decimal @db.Decimal(10,2)
+  occurredAt DateTime @default(now())
+  companyId String?
+  company Company? @relation(fields: [companyId], references: [id])
+  createdById String?
+  createdAt DateTime @default(now())
+  @@index([companyId, occurredAt])
+  @@index([type, occurredAt])
+}
+model AuditLog {
+  id String @id @default(cuid())
+  actorId String?
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorName String
+  action String
+  entity String
+  entityId String?
+  details Json?
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+  @@index([entity, entityId])
+}
+model CompanyPattern {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String @map("company_id")
+  patternKey String @map("pattern_key")
+  periodStart DateTime @db.Date @map("period_start")
+  periodEnd DateTime @db.Date @map("period_end")
+  sampleSize Int @default(0) @map("sample_size")
+  metrics Json @default("{}")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  @@unique([companyId, patternKey, periodStart, periodEnd])
+  @@index([companyId, periodEnd])
+  @@map("company_patterns")
+}
+model IntelligenceInsight {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String @map("company_id")
+  title String
+  diagnosis String
+  recommendation String
+  category String
+  severity String
+  status String @default("novo")
+  sampleSize Int @default(0) @map("sample_size")
+  evidence Json @default("{}")
+  cacheKey String? @map("cache_key")
+  expiresAt DateTime? @map("expires_at")
+  generatedAt DateTime @default(now()) @map("generated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  @@unique([companyId, cacheKey])
+  @@index([companyId, status, generatedAt])
+  @@map("insights")
+}
+model CompanyMemory {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String @unique @map("company_id")
+  summary String?
+  preferences Json @default("{}")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  @@map("company_memory")
+}
+model AiFeedback {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String @map("company_id")
+  insightId String? @db.Uuid @map("insight_id")
+  rating Int @db.SmallInt
+  comment String?
+  createdAt DateTime @default(now()) @map("created_at")
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  @@index([companyId, createdAt])
+  @@map("ai_feedback")
+}
+model AiUsageLog {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String @map("company_id")
+  model String
+  messageCount Int @default(1) @map("message_count")
+  inputTokens Int @default(0) @map("input_tokens")
+  outputTokens Int @default(0) @map("output_tokens")
+  cacheHit Boolean @default(false) @map("cache_hit")
+  createdAt DateTime @default(now()) @map("created_at")
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  @@index([companyId, createdAt])
+  @@map("ai_usage_log")
+}
+model OrderStatusHistory {
+  id String @id @default(cuid())
+  orderId String
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status OrderStatus
+  note String?
+  changedById String?
+  createdAt DateTime @default(now())
+}
+model Setting {
+  id String @id @default(cuid())
+  key String @unique
+  value Json
+  updatedAt DateTime @updatedAt
+}
+model Notification {
+  id String @id @default(cuid())
+  orderId String?
+  order Order? @relation(fields: [orderId], references: [id])
+  channel NotificationChannel
+  recipient String
+  message String
+  status String @default("PENDING")
+  error String?
+  sentAt DateTime?
+  createdAt DateTime @default(now())
+}
+model WhatsAppRequest {
+  id String @id @default(cuid())
+  messageId String? @unique
+  senderPhone String
+  message String
+  status String @default("DRAFT")
+  orderId String?
+  order Order? @relation(fields: [orderId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([senderPhone, status])
+}

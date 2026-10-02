@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+
+@theme inline {
+  --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, monospace;
+
+  --color-navy-950: #080f2a;
+  --color-navy-900: #0a1843;
+  --color-navy-800: #0c225a;
+  --color-navy-700: #102870;
+  --color-navy-600: #163690;
+  --color-navy-500: #1c45b0;
+  --color-navy-400: #2557d6;
+  --color-navy-300: #6b93f0;
+  --color-navy-200: #b0c8fa;
+  --color-navy-100: #dce8ff;
+  --color-navy-50: #f0f5ff;
+
+  --color-brand-600: #d96810;
+  --color-brand-500: #f47b20;
+  --color-brand-400: #f89040;
+  --color-brand-300: #fbaa70;
+  --color-brand-100: #fde8d0;
+  --color-brand-50: #fff5eb;
+
+  --color-sky-600: #0a90e0;
+  --color-sky-500: #1aa8f5;
+  --color-sky-400: #38b6ff;
+  --color-sky-300: #70ccff;
+  --color-sky-100: #d0edff;
+  --color-sky-50: #eaf6ff;
+
+  --color-surface: #f4f6fa;
+  --color-surface-card: #ffffff;
+  --color-border: #e2e8f0;
+  --color-border-dark: #cbd5e1;
+
+  --color-success-500: #10b981;
+  --color-success-100: #d1fae5;
+  --color-warning-500: #f59e0b;
+  --color-warning-100: #fef3c7;
+  --color-danger-500: #ef4444;
+  --color-danger-100: #fee2e2;
+  --color-info-500: #3b82f6;
+  --color-info-100: #dbeafe;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; }
+
+body {
+  margin: 0;
+  background-color: #f4f6fa;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+.scrollbar-hide { scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+/* Pulsing map marker */
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+.pulse-ring::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: #f47b20;
+  opacity: 0.4;
+  animation: pulse-ring 1.5s ease-out infinite;
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up { animation: fade-in-up 0.3s ease-out both; }
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in { animation: slide-in 0.25s ease-out both; }
+
+/* Chart tooltip */
+.recharts-tooltip-wrapper { outline: none; }
