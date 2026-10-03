@@ -103,12 +103,11 @@ confirme a geração de `JWT_SECRET` e configure `CORS_ORIGINS` com a origem HTT
 exata da aplicação Vercel, sem barra final. O backend exige origens explícitas
 em produção e não aceita o domínio local por padrão.
 
-Esta pasta do frontend Figma ainda não tem repositório Git próprio. O backend e
-as migrations foram integrados a partir da pasta original do projeto. O deploy
-depende de publicar a versão consolidada em um host Git, conectar o repositório
-às duas plataformas, definir os domínios finais e validar a migration/deploy.
-As configurações não publicam serviços por si só e não incluem credenciais do
-Supabase ou da Meta.
+O frontend Figma e o backend estão consolidados neste repositório Git. O código
+foi enviado ao remoto GitHub autorizado; ainda é necessário conectar este
+repositório à Vercel e ao Render, definir os domínios finais, configurar as
+variáveis secretas diretamente nos painéis dos serviços e validar o deploy.
+Nenhuma credencial do Supabase ou da Meta está incluída no repositório.
 
 ### Estado das migrations do Supabase de teste
 
