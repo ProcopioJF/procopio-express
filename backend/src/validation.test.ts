@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
 import {
+  addressSchema,
   adminOrderStatusSchema,
   courierOrderStatusSchema,
   financialEntryListQuerySchema,
@@ -12,6 +13,26 @@ import {
   planSchema,
   subscriptionSchema,
 } from "./validation.js"
+
+describe("delivery address CEP validation", () => {
+  const address = {
+    rua: "Rua Halfeld",
+    numero: "10",
+    bairro: "Centro",
+    cidade: "Juiz de Fora",
+    estado: "MG",
+  }
+
+  it("accepts an omitted or empty CEP", () => {
+    assert.equal(addressSchema.safeParse(address).success, true)
+    assert.equal(addressSchema.safeParse({ ...address, cep: "" }).success, true)
+  })
+
+  it("accepts a complete CEP and rejects partial values", () => {
+    assert.equal(addressSchema.safeParse({ ...address, cep: "36010000" }).success, true)
+    assert.equal(addressSchema.safeParse({ ...address, cep: "36010" }).success, false)
+  })
+})
 
 describe("courier order status validation", () => {
   it("accepts only delivery progress statuses", () => {

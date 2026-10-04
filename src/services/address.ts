@@ -18,6 +18,10 @@ export const emptyAddress = (): StructuredAddress => ({
 });
 export const cleanCep = (value: string) => value.replace(/\D/g, '').slice(0, 8);
 export const isValidCep = (value: string) => /^\d{8}$/.test(cleanCep(value));
+export const isValidOptionalCep = (value: string) => {
+  const digits = value.replace(/\D/g, '');
+  return digits.length === 0 || /^\d{8}$/.test(digits);
+};
 export const addressComplete = (address: StructuredAddress) =>
   !!address.rua.trim() && !!address.numero.trim() && !!address.bairro.trim();
 

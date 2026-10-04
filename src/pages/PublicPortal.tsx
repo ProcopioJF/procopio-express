@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { MapPin, Phone, User, Home, ChevronRight, ChevronLeft, Check, Package, Navigation, MessageCircle, Building2, ArrowRight } from 'lucide-react'
 import Logo from '../components/Logo'
-import { emptyAddress as newStructuredAddress, geocodeAddress } from '../services/address'
+import { emptyAddress as newStructuredAddress, geocodeAddress, isValidOptionalCep, lookupCep } from '../services/address'
 import { createPublicOrder, formatOrderPrice, getCompanyOrganization, getPublicSettings, getRoutePrice, type ApiDeliveryPrice, type ApiOrganization } from '../services/api'
 
 const DeliveryMap = lazy(() =>
@@ -50,10 +50,10 @@ function isValidPhone(value: string) {
 }
 
 function InputField({
-  label, value, onChange, placeholder, icon: Icon, type = 'text', required
+  label, value, onChange, placeholder, icon: Icon, type = 'text', required, helperText, error
 }: {
   label: string; value: string; onChange: (v: string) => void
-  placeholder?: string; icon?: any; type?: string; required?: boolean
+  placeholder?: string; icon?: any; type?: string; required?: boolean; helperText?: string; error?: string
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -74,6 +74,8 @@ function InputField({
           className={`w-full h-11 rounded-xl border border-[#d8e1eb] bg-white text-[#102a43] text-sm font-500 placeholder:text-[#8a9aab] focus:outline-none focus:border-[#39b5ee] focus:ring-4 focus:ring-[#39b5ee]/10 transition-all ${Icon ? 'pl-9 pr-3' : 'px-4'}`}
         />
       </div>
+      {helperText && <span className="text-[10px] text-[#718096]">{helperText}</span>}
+      {error && <span role="alert" className="text-[10px] text-red-600">{error}</span>}
     </div>
   )
 }
@@ -115,7 +117,7 @@ function ResponsiveDeliveryMap({
   delivery?: { latitude: number; longitude: number }
   className?: string
 }) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(true)
   const [isDesktop, setIsDesktop] = useState(() =>
     window.matchMedia('(min-width: 1024px)').matches,
   )
@@ -192,14 +194,20 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
   const [branchId, setBranchId] = useState('')
   const [costCenterId, setCostCenterId] = useState('')
   const [coordinates, setCoordinates] = useState<{ pickup?: { latitude: number; longitude: number }; delivery?: { latitude: number; longitude: number } }>({})
+  const [cepLookup, setCepLookup] = useState<{ pickupLoading: boolean; deliveryLoading: boolean; pickupError: string; deliveryError: string }>({
+    pickupLoading: false,
+    deliveryLoading: false,
+    pickupError: '',
+    deliveryError: '',
+  })
 
   const setPickupField = (field: keyof AddressForm) => (v: string) =>
     setPickup(p => ({ ...p, [field]: v }))
   const setDropoffField = (field: keyof AddressForm) => (v: string) =>
     setDropoff(p => ({ ...p, [field]: v }))
 
-  const step1Valid = pickup.name && isValidPhone(pickup.phone) && pickup.cep && pickup.street && pickup.number && pickup.neighborhood && pickup.city
-  const step2Valid = dropoff.name && isValidPhone(dropoff.phone) && dropoff.cep && dropoff.street && dropoff.number && dropoff.neighborhood && dropoff.city
+  const step1Valid = pickup.name && isValidPhone(pickup.phone) && isValidOptionalCep(pickup.cep) && pickup.street && pickup.number && pickup.neighborhood && pickup.city
+  const step2Valid = dropoff.name && isValidPhone(dropoff.phone) && isValidOptionalCep(dropoff.cep) && dropoff.street && dropoff.number && dropoff.neighborhood && dropoff.city
   const pickupAddress = { cep: pickup.cep.replace(/\D/g, ''), rua: pickup.street, numero: pickup.number, bairro: pickup.neighborhood, complemento: pickup.complement, cidade: pickup.city, estado: 'MG', coordinates: coordinates.pickup }
   const deliveryAddress = { cep: dropoff.cep.replace(/\D/g, ''), rua: dropoff.street, numero: dropoff.number, bairro: dropoff.neighborhood, complemento: dropoff.complement, cidade: dropoff.city, estado: 'MG', coordinates: coordinates.delivery }
 
@@ -212,6 +220,64 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
       setSettingsError(error instanceof Error ? error.message : 'Não foi possível carregar as configurações de atendimento.')
     })
   }, [])
+
+  useEffect(() => {
+    if (!pickup.cep || !/^\d{8}$/.test(pickup.cep.replace(/\D/g, ''))) {
+      setCepLookup(current => ({ ...current, pickupLoading: false, pickupError: '' }))
+      return
+    }
+    let active = true
+    setCepLookup(current => ({ ...current, pickupLoading: true, pickupError: '' }))
+    lookupCep(pickup.cep)
+      .then(result => {
+        if (!active) return
+        setPickup(current => ({
+          ...current,
+          street: result.rua || current.street,
+          neighborhood: result.bairro || current.neighborhood,
+          city: result.cidade || current.city,
+        }))
+      })
+      .catch(error => {
+        if (active) setCepLookup(current => ({
+          ...current,
+          pickupError: error instanceof Error ? error.message : 'Não foi possível consultar o CEP.',
+        }))
+      })
+      .finally(() => {
+        if (active) setCepLookup(current => ({ ...current, pickupLoading: false }))
+      })
+    return () => { active = false }
+  }, [pickup.cep])
+
+  useEffect(() => {
+    if (!dropoff.cep || !/^\d{8}$/.test(dropoff.cep.replace(/\D/g, ''))) {
+      setCepLookup(current => ({ ...current, deliveryLoading: false, deliveryError: '' }))
+      return
+    }
+    let active = true
+    setCepLookup(current => ({ ...current, deliveryLoading: true, deliveryError: '' }))
+    lookupCep(dropoff.cep)
+      .then(result => {
+        if (!active) return
+        setDropoff(current => ({
+          ...current,
+          street: result.rua || current.street,
+          neighborhood: result.bairro || current.neighborhood,
+          city: result.cidade || current.city,
+        }))
+      })
+      .catch(error => {
+        if (active) setCepLookup(current => ({
+          ...current,
+          deliveryError: error instanceof Error ? error.message : 'Não foi possível consultar o CEP.',
+        }))
+      })
+      .finally(() => {
+        if (active) setCepLookup(current => ({ ...current, deliveryLoading: false }))
+      })
+    return () => { active = false }
+  }, [dropoff.cep])
 
   useEffect(() => {
     if (!companyOrderMode || !token) return
@@ -410,7 +476,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                   <div className="col-span-2">
                     <InputField label="Telefone" value={pickup.phone} onChange={v => setPickupField('phone')(formatPhone(v))} placeholder="(32) 99999-0000" icon={Phone} required/>
                   </div>
-                  <InputField label="CEP" value={pickup.cep} onChange={v => setPickupField('cep')(formatCep(v))} placeholder="36000-000" required/>
+                  <InputField label="CEP (opcional)" value={pickup.cep} onChange={v => setPickupField('cep')(formatCep(v))} placeholder="36000-000" helperText={cepLookup.pickupLoading ? 'Consultando CEP…' : undefined} error={cepLookup.pickupError || (pickup.cep && !isValidOptionalCep(pickup.cep) ? 'Informe os 8 dígitos ou deixe em branco.' : undefined)}/>
                   <InputField label="Número" value={pickup.number} onChange={setPickupField('number')} placeholder="123" icon={Home} required/>
                   <div className="col-span-2">
                     <InputField label="Rua / Avenida" value={pickup.street} onChange={setPickupField('street')} placeholder="Rua Halfeld" required/>
@@ -456,7 +522,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                   <div className="col-span-2">
                     <InputField label="Telefone" value={dropoff.phone} onChange={v => setDropoffField('phone')(formatPhone(v))} placeholder="(32) 98888-0000" icon={Phone} required/>
                   </div>
-                  <InputField label="CEP" value={dropoff.cep} onChange={v => setDropoffField('cep')(formatCep(v))} placeholder="36010-000" required/>
+                  <InputField label="CEP (opcional)" value={dropoff.cep} onChange={v => setDropoffField('cep')(formatCep(v))} placeholder="36010-000" helperText={cepLookup.deliveryLoading ? 'Consultando CEP…' : undefined} error={cepLookup.deliveryError || (dropoff.cep && !isValidOptionalCep(dropoff.cep) ? 'Informe os 8 dígitos ou deixe em branco.' : undefined)}/>
                   <InputField label="Número" value={dropoff.number} onChange={setDropoffField('number')} placeholder="456" icon={Home} required/>
                   <div className="col-span-2">
                     <InputField label="Rua / Avenida" value={dropoff.street} onChange={setDropoffField('street')} placeholder="Av. Rio Branco" required/>
@@ -514,7 +580,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                   <SummaryRow label="Telefone" value={pickup.phone}/>
                   <SummaryRow label="Endereço" value={`${pickup.street}, ${pickup.number}`}/>
                   <SummaryRow label="Bairro" value={pickup.neighborhood}/>
-                  <SummaryRow label="Cidade / CEP" value={`${pickup.city} — ${pickup.cep}`}/>
+                  <SummaryRow label="Cidade / CEP" value={`${pickup.city}${pickup.cep ? ` — ${pickup.cep}` : ''}`}/>
                   {pickup.complement && <SummaryRow label="Complemento" value={pickup.complement}/>}
                 </div>
 
@@ -528,7 +594,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                   <SummaryRow label="Telefone" value={dropoff.phone}/>
                   <SummaryRow label="Endereço" value={`${dropoff.street}, ${dropoff.number}`}/>
                   <SummaryRow label="Bairro" value={dropoff.neighborhood}/>
-                  <SummaryRow label="Cidade / CEP" value={`${dropoff.city} — ${dropoff.cep}`}/>
+                  <SummaryRow label="Cidade / CEP" value={`${dropoff.city}${dropoff.cep ? ` — ${dropoff.cep}` : ''}`}/>
                   {dropoff.complement && <SummaryRow label="Complemento" value={dropoff.complement}/>}
                 </div>
 

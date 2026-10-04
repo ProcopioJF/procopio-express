@@ -12,7 +12,7 @@
     "backend:dev": "tsx watch backend/src/server.ts",
     "backend:typecheck": "tsc -p backend/tsconfig.json --noEmit",
     "backend:build": "tsc -p backend/tsconfig.json",
-    "test": "node --import tsx --test backend/prisma/intelligence-test-seed-config.test.ts backend/src/config.test.ts backend/src/validation.test.ts backend/src/services/intelligence.test.ts backend/src/services/routing.test.ts backend/src/services/whatsappMessage.test.ts src/services/pricing.test.ts",
+    "test": "node --import tsx --test backend/prisma/intelligence-test-seed-config.test.ts backend/src/config.test.ts backend/src/validation.test.ts backend/src/services/intelligence.test.ts backend/src/services/routing.test.ts backend/src/services/whatsappMessage.test.ts src/services/address.test.ts src/services/pricing.test.ts",
     "prisma:generate": "prisma generate --schema backend/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema backend/prisma/schema.prisma",
     "prisma:migrate:status": "prisma migrate status --schema backend/prisma/schema.prisma",
