@@ -12,31 +12,50 @@ describe("isDatabaseConfigured", () => {
   });
 
   describe("getWhatsAppIntegrationReadiness", () => {
+    it("keeps automatic sending unavailable even when future API settings are present", () => {
+      assert.deepEqual(
+        getWhatsAppIntegrationReadiness({
+          enabled: false,
+          accessToken: "token",
+          phoneNumberId: "phone-id",
+          operationsNumber: "5511999999999",
+          templateName: "novo_pedido",
+          templateLanguage: "pt_BR",
+        }),
+        {
+          status: "NOT_AVAILABLE",
+          note: "Envio automático desativado. Novos pedidos abrem uma mensagem pronta para envio manual no WhatsApp.",
+        },
+      )
+    })
+
     it("reports every missing setting without exposing configured values", () => {
       const readiness = getWhatsAppIntegrationReadiness({
+        enabled: true,
         accessToken: "secret-token-value",
         phoneNumberId: "phone-id-value",
       })
 
       assert.equal(readiness.status, "SETUP_REQUIRED")
       assert.match(readiness.note, /WHATSAPP_OPERATIONS_NUMBER/)
-      assert.match(readiness.note, /WHATSAPP_VERIFY_TOKEN/)
-      assert.match(readiness.note, /WHATSAPP_APP_SECRET/)
+      assert.match(readiness.note, /WHATSAPP_TEMPLATE_NAME/)
+      assert.match(readiness.note, /WHATSAPP_TEMPLATE_LANGUAGE/)
       assert.doesNotMatch(readiness.note, /secret-token-value|phone-id-value/)
     })
 
-    it("reports active only when outbound and webhook settings are present", () => {
+    it("reports active when the required outbound template settings are present", () => {
       assert.deepEqual(
         getWhatsAppIntegrationReadiness({
+          enabled: true,
           accessToken: "token",
           phoneNumberId: "phone-id",
           operationsNumber: "5511999999999",
-          verifyToken: "verify-token",
-          appSecret: "app-secret",
+          templateName: "novo_pedido",
+          templateLanguage: "pt_BR",
         }),
         {
           status: "ACTIVE",
-          note: "Credenciais, número operacional e requisitos do webhook configurados.",
+          note: "Envio de templates WhatsApp configurado.",
         },
       )
     })

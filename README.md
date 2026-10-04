@@ -104,8 +104,8 @@ O backend usa a porta `3333`; o Vite usa a porta configurada em `vite.config.ts`
 4. As quatro tabelas oficiais foram importadas e conferidas no Supabase de
    teste. O seed continua contendo dados de demonstração; não o use para
    substituir as tarifas comerciais.
-5. A arquitetura inicial será Supabase para PostgreSQL e Vercel para frontend
-   (Vite) e API Express (`api/[...path].ts`). Configure no projeto Vercel
+5. A arquitetura usa Supabase para PostgreSQL e Vercel para frontend
+   (Vite) e API Express (`api/v1.ts`). Configure no projeto Vercel
    `DATABASE_URL` com o pooler do Supabase, `JWT_SECRET` forte e
    `PER_KM_PRICING_ENABLED=false`; `CORS_ORIGINS` é opcional para URLs geradas
    pela Vercel e deve incluir qualquer domínio personalizado adicional. Deixe
@@ -127,15 +127,15 @@ node --import tsx --test backend/src/services/intelligence.test.ts
 node --import tsx --test backend/prisma/intelligence-test-seed-config.test.ts
 ```
 
-## Arquitetura inicial: Supabase + Vercel
+## Arquitetura: Supabase + Vercel
 
 - **Supabase:** PostgreSQL e migrations Prisma. A aplicação acessa o banco pelo
   backend Express; não usa a chave `service_role` nem expõe credenciais de banco
   ao navegador.
 - **Vercel:** frontend Vite como conteúdo estático e API Express como função
-  Node.js em `api/[...path].ts`, no mesmo domínio. O fallback SPA preserva as
-  rotas do frontend, `/api/*` atende o backend, `/health` encaminha ao health
-  check da API e `/webhooks/whatsapp` encaminha ao webhook Express.
+  Node.js em `api/v1.ts`, no mesmo domínio. O handler restaura os caminhos
+  encaminhados pelos rewrites antes de chamar o Express. `/health` encaminha ao
+  health check da API e `/webhooks/whatsapp` ao webhook.
 - O frontend usa `/api/v1` por padrão, então preview e produção usam a API do
   mesmo deployment, sem URL de API externa nem variável `VITE_API_URL`
   específica.
@@ -155,20 +155,34 @@ ambiente Vercel, nunca no código:
   `pgbouncer=true&connection_limit=1` à query string. Copie o host, porta e
   usuário exibidos pelo painel Supabase; não monte a URL manualmente.
 - `JWT_SECRET`: segredo forte e exclusivo do ambiente.
-- `NODE_ENV=production`: configure para os ambientes Production e Preview,
-  garantindo as verificações de segurança do backend em funções Vercel.
+- `NODE_ENV`: deixe a Vercel definir automaticamente; não force esse valor na
+  configuração de build.
 - `CORS_ORIGINS`: opcional; liste origens HTTPS adicionais separadas por vírgula.
 - `PER_KM_PRICING_ENABLED=false`: mantém “Consultar valor” como padrão.
 - `ROUTING_API_URL` e credenciais WhatsApp: opcionais, somente se os recursos
   correspondentes forem ativados.
 - `VITE_API_URL`: omita ou defina como `/api/v1` para usar o mesmo domínio.
 
-Use a conexão PostgreSQL direta do Supabase apenas para administrar migrations
+Use o pooler de sessão PostgreSQL do Supabase para administrar migrations
 manualmente, após confirmar o project ref e o ambiente; o Transaction pooler é
 para as requisições serverless, não para migrations. O build e a inicialização
-das funções Vercel não aplicam migrations. A produção permanece sem alterações
-até a autorização explícita para a etapa final de publicação. Nenhuma credencial
-do Supabase ou da Meta deve ser commitada.
+das funções Vercel não aplicam migrations. Nenhuma credencial do Supabase ou da
+Meta deve ser commitada.
+
+### Estado publicado em 4 de outubro de 2026
+
+A Production está publicada em `https://procopio-express.vercel.app/`, usando o
+deployment do commit `6cd4b78` na branch `preview/supabase-vercel`. As variáveis
+`DATABASE_URL` e `JWT_SECRET` estão configuradas no ambiente Production da
+Vercel, sem compartilhar valores com Preview. As 11 migrations Prisma estão
+aplicadas ao Supabase Production. A verificação confirmou `/health` com banco
+saudável, `/api/v1/public/settings` respondendo e o mapa carregando.
+
+As tarifas oficiais importadas e validadas no Supabase de teste foram copiadas
+para Production em 4 de outubro, após autorização. Foram importadas 4 tabelas,
+5 origens e 758 destinos (756 ativos); as 20 rotas legadas e os 3 pedidos
+existentes foram preservados. A conferência pública retornou preços fixos e
+“Consultar valor” para um bairro sem tarifa.
 
 ### Estado das migrations do Supabase de teste
 
@@ -181,12 +195,15 @@ contém os módulos de gestão e preços direcionais. A migration pendente
 somente `perKmRate` em `PriceTableDestination` e `Order`; não recria tabelas,
 tipos, índices ou dados existentes.
 
-Essa migration foi aplicada somente no Supabase de teste; `npm run
-prisma:migrate:status` confirmou que as 11 migrations estão sincronizadas e a
-introspecção confirmou as duas colunas. O endpoint `GET /health` também respondeu
-com API e banco saudáveis. A produção permanece sem alterações. Antes de liberar
-o uso, ainda valide login, permissões, criação e consulta de pedidos com dados
-de teste e confira as tarifas comerciais.
+Essa migration foi aplicada nos Supabase de teste e Production;
+`npm run prisma:migrate:status` confirmou que as 11 migrations estão
+sincronizadas e a introspecção confirmou as duas colunas. O endpoint
+`GET /health` também respondeu com API e banco saudáveis. As tarifas oficiais
+foram importadas no teste e copiadas para Production em 4 de outubro, após
+autorização. Login, permissões, tarifa, pedido sintético, rastreio e transições
+de status foram validados no Supabase de teste. Antes de liberar o uso
+operacional, faça os testes finais que dependem de dados reais em ambiente
+controlado; não crie pedidos artificiais na Production.
 
 ## Fluxo de pedidos
 
@@ -204,8 +221,8 @@ de teste e confira as tarifas comerciais.
 6. No painel Admin, a mesma conta pode confirmar o pedido, confirmar a coleta,
    iniciar a entrega e confirmar a conclusão. Cada etapa é sequencial, exige
    confirmação para concluir a entrega e fica registrada no histórico.
-7. Sem WhatsApp Business API configurada, a interface oferece um link com a
-   mensagem preenchida para continuar o atendimento manualmente.
+7. No modo inicial, o pedido é salvo e a interface abre o WhatsApp com a
+   mensagem preenchida; a pessoa responsável confere os dados e toca em Enviar.
 
 O nome e o telefone do solicitante são armazenados separadamente dos dados do
 destinatário e aparecem nas listas/relatórios. A migration
@@ -248,16 +265,24 @@ tem valor calculável, o pedido pode ser registrado sem preço e a interface
 mostra “Consultar valor”.
 
 A migration `20261002010000_management_and_pricing_api` e as tarifas oficiais
-foram aplicadas somente no Supabase de teste; a produção permanece sem
-alterações. As quatro origens (Altos dos Passos, Cascatinha, Centro e São
-Mateus) agora têm 189 destinos ativos cada, incluindo faixas e tarifas de
-R$ 1,30/km conforme as imagens. Os valores com barra foram importados como
+foram aplicadas no Supabase de teste e, depois de validação, copiadas para
+Production. As quatro origens (Altos dos Passos, Cascatinha, Centro e São
+Mateus) têm 189 destinos ativos cada, incluindo faixas e tarifas de R$ 1,30/km
+conforme as imagens. Os valores com barra foram importados como
 faixas mínima/máxima, conforme confirmado pelo usuário. O seed continua
 cadastrando tarifas de demonstração; não o use para substituir as oficiais.
 “Consultar valor” é o comportamento principal para as tarifas PER_KM. O cálculo
 é opcional e fica desativado por padrão; somente será utilizado se
 `PER_KM_PRICING_ENABLED=true`, `ROUTING_API_URL` e coordenadas válidas forem
 configurados. Sem todos esses itens, o pedido continua sob consulta.
+
+As 20 rotas legadas de Production foram mantidas. Quando uma origem possui
+tabela direcional, essa tabela passa a ser a fonte consultada; quatro preços
+legados divergentes foram substituídos na consulta pública pelas tarifas
+oficiais: Cascatinha → Cidade do Sol (R$ 24,00 → R$ 23,00), Cascatinha →
+Ladeira (R$ 15,00 → R$ 10,00), Cascatinha → Sagrado Coração (R$ 16,00 →
+R$ 10,00) e Centro → Sagrado Coração (R$ 16,00 → R$ 17,00). Os registros
+legados permanecem armazenados; a mudança é a precedência da tabela oficial.
 
 ## Mapa
 
@@ -270,17 +295,64 @@ estiverem configurados; caso contrário, a tarifa permanece “Consultar valor�
 
 ## WhatsApp
 
-Credenciais opcionais do backend:
+Inicialmente, o backend registra o pedido e prepara um link `wa.me`. O navegador
+abre o WhatsApp no dispositivo de quem fez o pedido com a mensagem pronta; a
+pessoa confere e toca em **Enviar**. Não há envio pela API nem respostas
+automáticas. Esse fluxo manual não exige conta de desenvolvedor Meta, template
+aprovado ou credenciais. O número operacional deve ser cadastrado nas
+Configurações com DDI e DDD.
 
-- `WHATSAPP_ACCESS_TOKEN`
+A mensagem distingue pedidos empresariais e avulsos: para empresa, informa o
+nome da empresa e os dados do recebedor e da entrega; para pedido avulso, informa
+solicitante, telefone e endereço de coleta, além dos dados do recebedor e da
+entrega.
+
+O envio por WhatsApp Cloud API permanece como caminho futuro opcional e está
+desativado por padrão. Mesmo que as credenciais da API estejam presentes, nada
+será enviado até a ativação explícita de `WHATSAPP_AUTO_SEND=true`.
+
+Variáveis previstas para uma futura ativação:
+
+- `WHATSAPP_ACCESS_TOKEN` (secreto)
 - `WHATSAPP_PHONE_NUMBER_ID`
-- `WHATSAPP_OPERATIONS_NUMBER`
-- `WHATSAPP_VERIFY_TOKEN`
-- `WHATSAPP_APP_SECRET`
+- `WHATSAPP_OPERATIONS_NUMBER` (telefone operacional com DDI)
+- `WHATSAPP_AUTO_SEND=false` (padrão seguro; mantenha desativado no início)
+- `WHATSAPP_TEMPLATE_NAME` (`novo_pedido`)
+- `WHATSAPP_TEMPLATE_LANGUAGE` (`pt_BR`)
 
-Sem as credenciais da Meta, o pedido continua sendo persistido e a mensagem pode
-ser aberta via link `wa.me`. Configure webhook público HTTPS antes de ativar a
-integração em produção.
+Para uma implementação futura do webhook de eventos da Meta, `WHATSAPP_VERIFY_TOKEN`
+e `WHATSAPP_APP_SECRET` são opcionais. O webhook público HTTPS é
+`https://procopio-express.vercel.app/webhooks/whatsapp`. O
+`WHATSAPP_VERIFY_TOKEN` deve ser um segredo aleatório definido por você e igual
+no app Meta e na Vercel; `WHATSAPP_APP_SECRET` é o App Secret da aplicação Meta.
+O `WHATSAPP_PHONE_NUMBER_ID` é o identificador do número remetente na Cloud API,
+enquanto `WHATSAPP_OPERATIONS_NUMBER` é o telefone que receberá os avisos, em
+formato internacional com DDI.
+
+Quando houver orçamento e decisão para ativar o envio automático, crie e aprove
+na Meta o template Utility `novo_pedido`, idioma `pt_BR`, com este corpo e cinco
+variáveis de texto:
+
+```text
+Novo pedido #{{1}} recebido pela Procópio Express.
+
+{{2}}
+Recebedor: {{3}}
+Endereço da entrega: {{4}}
+Telefone do recebedor: {{5}}
+```
+
+As variáveis são, na ordem: número do pedido; nome da empresa ou dados do
+solicitante e coleta; nome do recebedor; endereço de entrega; telefone do
+recebedor. O backend usa esse template para o aviso de novo pedido. A aprovação
+do template e o opt-in dos destinatários são necessários antes do envio
+proativo.
+
+Se aprovado no futuro, configure credenciais como variáveis **sensíveis** no
+Preview, teste com número autorizado e template aprovado, avalie custos e
+consentimento e só então configure credenciais separadas em Production. Nunca
+cole tokens ou App Secrets no código, no Git ou no chat. O webhook e as respostas
+automáticas não fazem parte do fluxo inicial.
 
 ## Autenticação e contas de desenvolvimento
 
@@ -305,16 +377,32 @@ configure um `JWT_SECRET` seguro e restrinja CORS antes do uso real.
 - O cálculo PER_KM é opcional e começa desativado; para habilitá-lo, configure
   `PER_KM_PRICING_ENABLED=true`, `ROUTING_API_URL` e valide com coordenadas de
   teste. Sem ativação explícita, a cotação permanece como “Consultar valor”.
-- Publicação online está deliberadamente adiada para a última etapa, conforme
-  decisão do usuário. A arquitetura inicial definida é Supabase + Vercel;
-  configurar projetos, domínios e variáveis, e publicar somente com autorização
-  explícita.
-- Confirmar/configurar credenciais do WhatsApp Business, webhook público HTTPS
-  e CORS no domínio de produção.
-- Validar migrations, health check, login e um pedido de ponta a ponta no
-  ambiente de produção somente depois da autorização explícita para publicação;
-  a migration atual já está aplicada no banco de teste.
+- A Production já está publicada e os health checks foram validados. Login,
+  permissões, tarifas e fluxo de pedido de ponta a ponta também foram
+  verificados em teste; não criar dados operacionais artificiais na Production.
+- Configurar credenciais do WhatsApp Business e webhook público HTTPS se o
+  envio automático for necessário. Sem elas, o fluxo oferece atendimento manual
+  por link `wa.me`.
+- As tarifas oficiais já foram importadas e conferidas no Supabase Production;
+  valide alterações futuras em teste antes de aplicá-las ao banco comercial.
 - Relatórios contábeis de despesas fora dos valores dos pedidos.
 - O painel separado do motoboy continua disponível para operações com contas
   Courier; para operação individual, a conta Admin atualiza as etapas sem
   atribuição ou login separado.
+
+## Testes
+
+Execute todos os testes automatizados TypeScript com:
+
+```powershell
+npm test
+```
+
+O comando usa `tsx` para carregar os testes Node.js sem build prévio. Para
+validar também os tipos e os bundles de produção:
+
+```powershell
+npm run backend:typecheck
+npm run backend:build
+npm run build
+```

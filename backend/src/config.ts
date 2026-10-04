@@ -10,9 +10,19 @@ export const config = {
   whatsappToken: process.env.WHATSAPP_ACCESS_TOKEN,
   whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
   whatsappOperationsNumber: (process.env.WHATSAPP_OPERATIONS_NUMBER ?? "").replace(/\D/g, ""),
+  whatsappAutoSend: process.env.WHATSAPP_AUTO_SEND === "true",
+  whatsappTemplateName: process.env.WHATSAPP_TEMPLATE_NAME ?? "",
+  whatsappTemplateLanguage: process.env.WHATSAPP_TEMPLATE_LANGUAGE ?? "",
   whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
   whatsappAppSecret: process.env.WHATSAPP_APP_SECRET ?? "",
-  whatsappAutoReply: process.env.WHATSAPP_AUTO_REPLY !== "false",
+  whatsappBusinessApiReady:
+    process.env.WHATSAPP_AUTO_SEND === "true" &&
+    Boolean(
+      process.env.WHATSAPP_ACCESS_TOKEN &&
+      process.env.WHATSAPP_PHONE_NUMBER_ID &&
+      process.env.WHATSAPP_TEMPLATE_NAME &&
+      process.env.WHATSAPP_TEMPLATE_LANGUAGE,
+    ),
   routingApiUrl: (process.env.ROUTING_API_URL ?? "").trim().replace(/\/+$/, ""),
   perKmPricingEnabled: process.env.PER_KM_PRICING_ENABLED === "true",
 };
@@ -28,18 +38,26 @@ export function isDatabaseConfigured(databaseUrl: string) {
 }
 
 export function getWhatsAppIntegrationReadiness(settings: {
+  enabled?: boolean
   accessToken?: string
   phoneNumberId?: string
   operationsNumber?: string
-  verifyToken?: string
-  appSecret?: string
+  templateName?: string
+  templateLanguage?: string
 }) {
+  if (!settings.enabled) {
+    return {
+      status: "NOT_AVAILABLE" as const,
+      note: "Envio automático desativado. Novos pedidos abrem uma mensagem pronta para envio manual no WhatsApp.",
+    }
+  }
+
   const requiredSettings = [
     ["accessToken", "WHATSAPP_ACCESS_TOKEN"],
     ["phoneNumberId", "WHATSAPP_PHONE_NUMBER_ID"],
     ["operationsNumber", "WHATSAPP_OPERATIONS_NUMBER"],
-    ["verifyToken", "WHATSAPP_VERIFY_TOKEN"],
-    ["appSecret", "WHATSAPP_APP_SECRET"],
+    ["templateName", "WHATSAPP_TEMPLATE_NAME"],
+    ["templateLanguage", "WHATSAPP_TEMPLATE_LANGUAGE"],
   ] as const
 
   const missing = requiredSettings
@@ -49,7 +67,7 @@ export function getWhatsAppIntegrationReadiness(settings: {
   return {
     status: missing.length === 0 ? "ACTIVE" as const : "SETUP_REQUIRED" as const,
     note: missing.length === 0
-      ? "Credenciais, número operacional e requisitos do webhook configurados."
+      ? "Envio de templates WhatsApp configurado."
       : `Configuração incompleta no backend. Variáveis pendentes: ${missing.join(", ")}.`,
   }
 }

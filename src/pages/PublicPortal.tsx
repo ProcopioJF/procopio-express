@@ -307,7 +307,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
               ? 'A mensagem foi enviada automaticamente ao WhatsApp da Procópio Express.'
               : orderResult?.whatsapp?.fallbackUrl
                 ? orderResult.whatsapp.status === 'pending'
-                  ? 'O pedido foi registrado. Continue o atendimento pelo WhatsApp usando a mensagem preparada.'
+                  ? 'O WhatsApp foi aberto com a mensagem preparada. Confira os dados e toque em Enviar para concluir o atendimento.'
                   : 'Não foi possível confirmar o envio automático. Continue o atendimento pelo WhatsApp usando a mensagem preparada.'
                 : 'O WhatsApp da operação não está configurado. Anote o número do pedido e entre em contato com a Procópio Express.'}
           </p>

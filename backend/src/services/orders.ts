@@ -57,7 +57,7 @@ export async function createOrder(input: unknown, createdById?: string, companyI
       requesterName: data.requesterName,
       requesterPhone: data.requesterPhone,
       companyId,
-      createdById, status: OrderStatus.FINALIZED, history: { create: { status: OrderStatus.FINALIZED, note: "Pedido finalizado no site e registrado para controle." } } }, include: { history: true } });
+      createdById, status: OrderStatus.FINALIZED, history: { create: { status: OrderStatus.FINALIZED, note: "Pedido finalizado no site e registrado para controle." } } }, include: { history: true, company: { select: { name: true } } } });
   });
 }
 export function publicOrder(order: any) { return { publicId: order.publicId, status: order.status, price: order.price, recipientName: order.recipientName, history: order.history }; }

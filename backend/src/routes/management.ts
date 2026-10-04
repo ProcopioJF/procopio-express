@@ -320,11 +320,12 @@ adminRouter.patch("/system-users/:id", route(async (req, res) => {
 
 adminRouter.get("/integrations", route(async (_req, res) => {
   const whatsapp = getWhatsAppIntegrationReadiness({
+    enabled: config.whatsappAutoSend,
     accessToken: config.whatsappToken,
     phoneNumberId: config.whatsappPhoneNumberId,
     operationsNumber: config.whatsappOperationsNumber,
-    verifyToken: config.whatsappVerifyToken,
-    appSecret: config.whatsappAppSecret,
+    templateName: config.whatsappTemplateName,
+    templateLanguage: config.whatsappTemplateLanguage,
   });
   const routingConfigured = config.perKmPricingEnabled && Boolean(config.routingApiUrl);
   res.json({
