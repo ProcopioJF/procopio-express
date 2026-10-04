@@ -5,12 +5,22 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "missing": [
+        {
+          "type": "query",
+          "key": "__px_original_path"
+        }
+      ],
+      "destination": "/api/v1?__px_original_path=/api/:path*"
+    },
+    {
       "source": "/health",
-      "destination": "/api/health"
+      "destination": "/api/v1?__px_original_path=/health"
     },
     {
       "source": "/webhooks/whatsapp",
-      "destination": "/api/webhooks/whatsapp"
+      "destination": "/api/v1?__px_original_path=/webhooks/whatsapp"
     }
   ]
 }
