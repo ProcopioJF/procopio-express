@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 
 import type { ReactNode } from "react"
 
@@ -11,7 +11,7 @@ import {
   Sparkles,
 } from "lucide-react"
 
-import type { ApiCompany, ApiDashboardSummary, ApiOrder } from "../services/api"
+import { askIntelligence, type ApiIntelligenceMetrics } from "../services/api"
 
 type Message = { role: "assistant" | "user"; text: string }
 
@@ -28,9 +28,9 @@ const COMPANY_QUESTIONS = [
 const ADMIN_QUESTIONS = [
   "Qual empresa mais pediu este mês?",
 
-  "Qual empresa tem mais entregas?",
+  "Qual bairro recebe mais pedidos?",
 
-  "Quais contas precisam de atenção?",
+  "Qual bairro tem maior valor médio?",
 
   "Qual é o diagnóstico geral da operação?",
 ]
@@ -40,177 +40,76 @@ function money(value: number) {
 }
 
 export default function IntelligencePanel({
-  orders,
-
-  summary,
-
+  token,
   companyName,
-
-  companies = [],
-
   audience = "company",
 }: {
-  orders: ApiOrder[]
-
-  summary: ApiDashboardSummary
-
+  token: string
   companyName: string
-
-  companies?: ApiCompany[]
-
   audience?: "company" | "admin"
 }) {
   const [question, setQuestion] = useState("")
-
   const [messages, setMessages] = useState<Message[]>([])
-
   const [answering, setAnswering] = useState(false)
-
+  const [metrics, setMetrics] = useState<ApiIntelligenceMetrics | null>(null)
   const company = audience === "company"
-
   const suggestions = company ? COMPANY_QUESTIONS : ADMIN_QUESTIONS
 
-  const analytics = useMemo(() => {
-    const requesters = new Map<string, number>()
-
-    const neighborhoods = new Map<string, number>()
-
-    const hours = new Map<number, number>()
-
-    const orderCompanies = new Map<string, number>()
-
-    orders.forEach((order) => {
-      const requester =
-        order.requesterName?.trim() || order.recipientName?.trim()
-
-      if (requester)
-        requesters.set(requester, (requesters.get(requester) ?? 0) + 1)
-
-      const neighborhood = order.deliveryNeighborhood?.trim()
-
-      if (neighborhood)
-        neighborhoods.set(
-          neighborhood,
-          (neighborhoods.get(neighborhood) ?? 0) + 1,
-        )
-
-      const created = new Date(order.createdAt)
-
-      if (!Number.isNaN(created.getTime()))
-        hours.set(created.getHours(), (hours.get(created.getHours()) ?? 0) + 1)
-
-      if (order.companyId)
-        orderCompanies.set(
-          order.companyId,
-          (orderCompanies.get(order.companyId) ?? 0) + 1,
-        )
-    })
-
-    const topRequester = [...requesters.entries()].sort(
-      (a, b) => b[1] - a[1],
-    )[0]
-
-    const topNeighborhood = [...neighborhoods.entries()].sort(
-      (a, b) => b[1] - a[1],
-    )[0]
-
-    const peakHour = [...hours.entries()].sort((a, b) => b[1] - a[1])[0]
-
-    const topCompany = [...companies]
-
-      .sort((a, b) => b._count.orders - a._count.orders)[0]
-
-    const companyShare =
-      topCompany && summary.allTime.orders
-        ? Math.round((topCompany._count.orders / summary.allTime.orders) * 100)
-        : 0
-
-    return { topRequester, topNeighborhood, peakHour, topCompany, companyShare }
-  }, [companies, orders, summary.allTime.orders])
-
-  const answerFor = (prompt: string) => {
-    const normalized = prompt.toLocaleLowerCase("pt-BR")
-
-    if (
-      company &&
-      (normalized.includes("quem") || normalized.includes("solicit"))
-    ) {
-      return analytics.topRequester
-        ? `${analytics.topRequester[0]} aparece com mais solicitações entre os ${orders.length} registros recentes analisados (${analytics.topRequester[1]} pedidos). O indicador de volume total da empresa é ${summary.allTime.orders.toLocaleString("pt-BR")} entregas.`
-        : "Ainda não há solicitantes suficientes nos registros carregados para apontar uma liderança."
-    }
-
-    if (
-      normalized.includes("bairro") ||
-      normalized.includes("reduzir custo") ||
-      normalized.includes("região")
-    ) {
-      const average = summary.allTime.average
-
-      return analytics.topNeighborhood
-        ? `O bairro ${analytics.topNeighborhood[0]} concentra mais entregas nos registros recentes (${analytics.topNeighborhood[1]} de ${orders.length}). O custo médio histórico por pedido é ${money(average)}. Compare os valores por rota cadastrados antes de alterar a operação.`
-        : "Os endereços dos pedidos recentes ainda não permitem comparar bairros. O custo médio registrado é " +
-            money(average) +
-            "."
-    }
-
-    if (normalized.includes("horário") || normalized.includes("hora")) {
-      return analytics.peakHour
-        ? `A maior concentração nos registros disponíveis ocorreu às ${String(analytics.peakHour[0]).padStart(2, "0")}h (${analytics.peakHour[1]} pedidos). O conjunto considera os ${orders.length} pedidos carregados, não uma previsão de demanda.`
-        : "Ainda não há horários de pedido suficientes para identificar um pico com confiança."
-    }
-
-    if (
-      company &&
-      (normalized.includes("próximo mês") || normalized.includes("previs"))
-    ) {
-      return "A projeção não está disponível com segurança: o painel recebe os registros recentes e os totais consolidados, mas não dispõe de uma série histórica mensal completa para estimar o próximo mês."
-    }
-
-    if (
-      !company &&
-      (normalized.includes("mais pediu") ||
-        normalized.includes("mais entrega") ||
-        normalized.includes("volume"))
-    ) {
-      return analytics.topCompany
-        ? `${analytics.topCompany.name} tem o maior volume acumulado entre as empresas cadastradas: ${analytics.topCompany._count.orders.toLocaleString("pt-BR")} pedidos (${analytics.companyShare}% do total consolidado).`
-        : "Ainda não há empresas com pedidos registrados para comparar."
-    }
-
-    if (
-      !company &&
-      (normalized.includes("atenção") || normalized.includes("risco"))
-    ) {
-      const cancelled = orders.filter(
-        (order) => order.status === "CANCELLED",
-      ).length
-
-      return `Nos ${orders.length} pedidos recentes, ${cancelled} estão cancelados. Para avaliar risco comercial por conta, compare este indicador com a evolução mensal de cada empresa; essa série histórica não está disponível no painel atual.`
-    }
-
-    return `Foram registrados ${summary.allTime.orders.toLocaleString("pt-BR")} pedidos no total, com valor médio de ${money(summary.allTime.average)}. Esta análise usa os indicadores consolidados e os ${orders.length} pedidos recentes carregados no painel.`
-  }
-
-  const submit = (value = question) => {
-    const prompt = value.trim()
-
-    if (!prompt || answering) return
-
-    setQuestion("")
-
-    setMessages((current) => [...current, { role: "user", text: prompt }])
-
+  useEffect(() => {
+    let active = true
     setAnswering(true)
+    askIntelligence(token, "resumo geral")
+      .then((result) => {
+        if (!active) return
+        setMetrics(result.metrics)
+        setMessages([{ role: "assistant", text: result.answer }])
+      })
+      .catch((error: unknown) => {
+        if (!active) return
+        const detail =
+          error instanceof Error ? error.message : "Erro desconhecido."
+        setMessages([
+          {
+            role: "assistant",
+            text: `Não foi possível consultar os dados do app: ${detail}`,
+          },
+        ])
+      })
+      .finally(() => {
+        if (active) setAnswering(false)
+      })
 
-    window.setTimeout(() => {
+    return () => {
+      active = false
+    }
+  }, [token])
+
+  const submit = async (value = question) => {
+    const prompt = value.trim()
+    if (!prompt || answering) return
+    setQuestion("")
+    setMessages((current) => [...current, { role: "user", text: prompt }])
+    setAnswering(true)
+    try {
+      const result = await askIntelligence(token, prompt)
+      setMetrics(result.metrics)
       setMessages((current) => [
         ...current,
-        { role: "assistant", text: answerFor(prompt) },
+        { role: "assistant", text: result.answer },
       ])
-
+    } catch (error) {
+      const detail =
+        error instanceof Error ? error.message : "Erro desconhecido."
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          text: `Não foi possível consultar os dados do app: ${detail}`,
+        },
+      ])
+    } finally {
       setAnswering(false)
-    }, 350)
+    }
   }
 
   return (
@@ -228,7 +127,7 @@ export default function IntelligencePanel({
                     Procópio Intelligence
                   </h2>
                   <span className="rounded-full border border-white/20 px-2 py-1 text-[9px] font-bold uppercase tracking-wide text-white/75">
-                    Dados atualizados
+                    Análise local
                   </span>
                 </div>
                 <p className="mt-0.5 text-xs text-white/65">
@@ -240,8 +139,8 @@ export default function IntelligencePanel({
             </div>
             <p className="mt-4 text-sm leading-6 text-white/80">
               {company
-                ? "Pergunte sobre suas entregas, custos e padrões. As respostas usam somente os dados vinculados ao seu cadastro."
-                : "Pergunte sobre qualquer empresa, compare desempenho e receba uma direção baseada no histórico consolidado da plataforma."}
+                ? "Pergunte sobre pedidos, valores, quilômetros e bairros. A análise consulta todo o histórico da sua empresa no banco do app."
+                : "Pergunte sobre pedidos, valores, quilômetros, bairros e empresas usando o histórico consolidado do app."}
             </p>
           </div>
           <div className="flex max-w-xs items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-3 py-2.5 text-xs text-white/80">
@@ -262,32 +161,48 @@ export default function IntelligencePanel({
       <section className="grid gap-3 sm:grid-cols-3">
         <SummaryCard
           label="Base analisada"
-          value={summary.allTime.orders.toLocaleString("pt-BR")}
-          detail={`${orders.length} pedidos recentes disponíveis`}
+          value={metrics?.ordersAnalyzed.toLocaleString("pt-BR") ?? "—"}
+          detail={
+            metrics
+              ? `${metrics.ordersWithDistance} com km · ${metrics.ordersWithoutDistance} sem km`
+              : "Carregando o histórico do app"
+          }
           icon={<BrainCircuit size={16} />}
         />
         <SummaryCard
-          label={company ? "Maior concentração" : "Maior volume"}
+          label={company ? "Maior concentração" : "Maior volume no mês"}
           value={
             company
-              ? (analytics.topNeighborhood?.[0] ?? "—")
-              : (analytics.topCompany?.name ?? "—")
+              ? (metrics?.topDeliveryNeighborhood?.name ?? "—")
+              : (metrics?.topCompanyThisMonth?.name ?? "—")
           }
           detail={
             company
-              ? analytics.topNeighborhood
-                ? `${analytics.topNeighborhood[1]} pedidos nos registros recentes`
+              ? metrics?.topDeliveryNeighborhood
+                ? `${metrics.topDeliveryNeighborhood.count} pedidos no histórico`
                 : "Sem dados de bairro"
-              : analytics.topCompany
-                ? `${analytics.topCompany._count.orders.toLocaleString("pt-BR")} pedidos`
+              : metrics?.topCompanyThisMonth
+                ? `${metrics.topCompanyThisMonth.count} pedidos neste mês`
                 : "Sem pedidos empresariais"
           }
           icon={<Building2 size={16} />}
         />
         <SummaryCard
-          label="Ticket médio"
-          value={money(summary.allTime.average)}
-          detail="Por entrega registrada"
+          label="Preço médio registrado"
+          value={
+            metrics
+              ? metrics.ordersWithRecordedPrice > 0
+                ? money(metrics.averageRecordedPrice)
+                : "—"
+              : "Carregando"
+          }
+          detail={
+            metrics
+              ? metrics.ordersWithRecordedPrice > 0
+                ? `Entre ${metrics.ordersWithRecordedPrice} pedidos com valor informado`
+                : "Sem pedidos com preço registrado"
+              : "Valores registrados no banco"
+          }
           icon={<ArrowUpRight size={16} />}
         />
       </section>
@@ -309,17 +224,23 @@ export default function IntelligencePanel({
               </div>
             </div>
             <span className="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-600">
-              <i className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              Pronto para analisar
+              <i
+                className={`h-1.5 w-1.5 rounded-full ${answering ? "animate-pulse bg-amber-500" : metrics ? "bg-emerald-500" : "bg-red-500"}`}
+              />
+              {answering
+                ? "Consultando o banco"
+                : metrics
+                  ? "Análise local ativa"
+                  : "Dados indisponíveis"}
             </span>
           </header>
 
           <div className="flex-1 space-y-4 overflow-y-auto p-5">
-            <MessageBubble role="assistant">
-              {company
-                ? "Seus dados estão prontos. Posso transformar o histórico da sua empresa em respostas e próximos passos objetivos."
-                : "Visão global pronta. Posso comparar as empresas e resumir volume, concentração de pedidos e pontos que merecem atenção."}
-            </MessageBubble>
+            {messages.length === 0 && !answering && (
+              <MessageBubble role="assistant">
+                Aguardando consulta ao banco do aplicativo.
+              </MessageBubble>
+            )}
             {messages.map((message, index) => (
               <MessageBubble
                 key={`${message.role}-${index}`}
@@ -363,8 +284,8 @@ export default function IntelligencePanel({
             </button>
           </form>
           <p className="px-5 pb-4 text-[10px] text-[#94a3b8]">
-            Análise demonstrativa baseada nos registros do painel; valide
-            decisões operacionais antes de executá-las.
+            Análise determinística local sobre os dados do banco; valores e
+            distâncias ausentes não são estimados.
           </p>
         </article>
 
@@ -396,13 +317,13 @@ export default function IntelligencePanel({
               <h3 className="text-xs font-bold">Direção prioritária</h3>
             </div>
             <p className="mt-3 text-xs leading-5 text-[#6e5b4d]">
-              {company
-                ? analytics.topNeighborhood
-                  ? `Acompanhe a concentração de pedidos em ${analytics.topNeighborhood[0]} e compare o custo médio das rotas desse bairro com o restante da operação.`
-                  : "Registre mais pedidos com endereços completos para identificar padrões de demanda e custo por região."
-                : analytics.topCompany
-                  ? `Revise o desempenho de ${analytics.topCompany.name}, empresa com maior volume acumulado, e compare seus indicadores com os registros recentes.`
-                  : "Cadastre empresas e registre pedidos para liberar comparações entre contas."}
+              {metrics?.highestAveragePriceNeighborhood
+                ? `${metrics.highestAveragePriceNeighborhood.name} tem o maior valor médio registrado (${money(metrics.highestAveragePriceNeighborhood.averagePrice)}). Use a concentração e o volume de pedidos para investigar as rotas; esse valor não representa, sozinho, custo operacional.`
+                : company
+                  ? "Ainda não há valores e bairros suficientes para comparar rotas. Registre pedidos com preço e endereço para habilitar essa análise."
+                  : metrics?.topCompanyThisMonth
+                    ? `Revise o volume de ${metrics.topCompanyThisMonth.name}, empresa com mais pedidos registrados neste mês.`
+                    : "Cadastre empresas e registre pedidos para liberar comparações entre contas."}
             </p>
           </section>
         </aside>

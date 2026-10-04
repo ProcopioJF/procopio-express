@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import {
   BarChart3,
@@ -8,10 +8,14 @@ import {
   FileText,
   LayoutDashboard,
   LogOut,
+  Menu,
   Package,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Search,
   Sparkles,
+  X,
 } from "lucide-react"
 
 import DashboardChartsPanel from "../components/DashboardChartsPanel"
@@ -24,19 +28,26 @@ import Logo from "../components/Logo"
 
 import {
   formatOrderPrice,
+  ORDER_STATUS_LABELS,
+  getDashboardCharts,
   getCompanySettings,
   getDashboardSummary,
   getPanelOrders,
   saveCompanySettings,
   type ApiCompanySettings,
   type ApiDashboardSummary,
+  type ApiDashboardCharts,
   type ApiOrder,
   type ApiUser,
 } from "../services/api"
 
 type Section = "overview" | "orders" | "intelligence" | "finance" | "reports" | "profile"
 
-const NAV: Array<{ id: Section; label: string; icon: typeof LayoutDashboard }> = [
+const NAV: Array<{
+  id: Section
+  label: string
+  icon: typeof LayoutDashboard
+}> = [
   { id: "overview", label: "Visão Geral", icon: LayoutDashboard },
 
   { id: "orders", label: "Entregas", icon: Package },
@@ -60,6 +71,18 @@ const EMPTY_SUMMARY: ApiDashboardSummary = {
   allTime: { orders: 0, total: 0, average: 0 },
 
   timezone: "America/Sao_Paulo",
+}
+
+const EMPTY_CHARTS: ApiDashboardCharts = {
+  recentDays: [],
+  months: [],
+  hours: [],
+  neighborhoods: [],
+  companyVolume: [],
+  peakNeighborhood: "—",
+  peakHour: { hour: 8, label: "8h", orders: 0 },
+  previousMonthOrders: 0,
+  currentMonthOrders: 0,
 }
 
 const EMPTY_PROFILE: ApiCompanySettings = {
@@ -122,7 +145,8 @@ function MetricCard({
 
 function OrdersTable({ orders }: { orders: ApiOrder[] }) {
   return (
-    <div className="overflow-x-auto rounded-2xl border border-[#e8edf4] bg-white">
+    <>
+    <div className="hidden overflow-x-auto rounded-2xl border border-[#e8edf4] bg-white md:block">
       <table className="w-full min-w-[1080px] text-left">
         <thead className="bg-[#f8fafc] text-[10px] uppercase tracking-wider text-[#7b8ba1]">
           <tr>
@@ -183,7 +207,9 @@ function OrdersTable({ orders }: { orders: ApiOrder[] }) {
                 )}
               </td>
               <td className="px-4 py-3 text-[#64748b]">
-                {[order.branch?.name, order.costCenter?.name].filter(Boolean).join(" · ") || "Sede / não informado"}
+                {[order.branch?.name, order.costCenter?.name]
+                  .filter(Boolean)
+                  .join(" · ") || "Sede / não informado"}
               </td>
               <td className="px-4 py-3 font-bold text-[#102b55]">
                 {formatOrderPrice(order)}
@@ -193,10 +219,12 @@ function OrdersTable({ orders }: { orders: ApiOrder[] }) {
                   className={`rounded-full px-2.5 py-1 font-bold ${
                     order.status === "CANCELLED"
                       ? "bg-red-50 text-red-700"
-                      : "bg-emerald-50 text-emerald-700"
+                      : order.status === "DELIVERED"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-blue-50 text-blue-700"
                   }`}
                 >
-                  {order.status === "CANCELLED" ? "Cancelada" : "Concluída"}
+                  {ORDER_STATUS_LABELS[order.status]}
                 </span>
               </td>
             </tr>
@@ -209,6 +237,84 @@ function OrdersTable({ orders }: { orders: ApiOrder[] }) {
         </p>
       )}
     </div>
+    <div className="grid gap-3 md:hidden">
+      {orders.map((order) => (
+        <article
+          key={order.id}
+          className="rounded-2xl border border-[#e5eaf0] bg-white p-4 shadow-sm"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-mono text-xs font-bold text-[#0f3266]">
+                Pedido #{order.publicId}
+              </p>
+              <p className="mt-1 text-[11px] text-[#64748b]">
+                {new Date(order.createdAt).toLocaleString("pt-BR")}
+              </p>
+            </div>
+            <span
+              className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                order.status === "CANCELLED"
+                  ? "bg-red-50 text-red-700"
+                  : order.status === "DELIVERED"
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-blue-50 text-blue-700"
+              }`}
+            >
+              {ORDER_STATUS_LABELS[order.status]}
+            </span>
+          </div>
+          <div className="mt-3 space-y-2 border-t border-[#eef2f6] pt-3 text-xs">
+            <div className="flex justify-between gap-3">
+              <span className="shrink-0 text-[#64748b]">Solicitante</span>
+              <span className="text-right font-semibold text-[#102a43]">
+                {order.requesterName || order.recipientName}
+                <small className="mt-0.5 block text-[10px] font-normal text-[#64748b]">
+                  {order.requesterPhone || order.recipientPhone || "—"}
+                </small>
+              </span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="shrink-0 text-[#64748b]">Destinatário</span>
+              <span className="text-right font-semibold text-[#102a43]">
+                {order.recipientName}
+                <small className="mt-0.5 block text-[10px] font-normal text-[#64748b]">
+                  {order.recipientPhone || "—"}
+                </small>
+              </span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="shrink-0 text-[#64748b]">Origem</span>
+              <span className="break-words text-right text-[#334155]">
+                {address(order.pickupStreet, order.pickupNumber, order.pickupNeighborhood)}
+              </span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="shrink-0 text-[#64748b]">Destino</span>
+              <span className="break-words text-right text-[#334155]">
+                {address(order.deliveryStreet, order.deliveryNumber, order.deliveryNeighborhood)}
+              </span>
+            </div>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-[#eef2f6] pt-3">
+            <span className="truncate text-[11px] text-[#64748b]">
+              {[order.branch?.name, order.costCenter?.name]
+                .filter(Boolean)
+                .join(" · ") || "Sede / não informado"}
+            </span>
+            <strong className="shrink-0 text-sm text-[#0f3266]">
+              {formatOrderPrice(order)}
+            </strong>
+          </div>
+        </article>
+      ))}
+      {orders.length === 0 && (
+        <p className="rounded-2xl border border-[#e5eaf0] bg-white p-8 text-center text-sm text-[#7b8ba1]">
+          Ainda não há entregas registradas para esta empresa.
+        </p>
+      )}
+    </div>
+    </>
   )
 }
 
@@ -233,15 +339,30 @@ export default function CompanyDashboard({
 
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
   const [orders, setOrders] = useState<ApiOrder[]>([])
 
   const [summary, setSummary] = useState(EMPTY_SUMMARY)
+
+  const [charts, setCharts] = useState(EMPTY_CHARTS)
 
   const [profile, setProfile] = useState(EMPTY_PROFILE)
 
   const [search, setSearch] = useState("")
 
   const [orderFilter, setOrderFilter] = useState<"all" | "completed">("all")
+
+  const [orderFrom, setOrderFrom] = useState("")
+
+  const [orderTo, setOrderTo] = useState("")
+
+  const [orderPage, setOrderPage] = useState({
+    page: 1,
+    pageSize: 25,
+    total: 0,
+    totalPages: 0,
+  })
 
   const [loading, setLoading] = useState(true)
 
@@ -257,17 +378,24 @@ export default function CompanyDashboard({
     setError("")
 
     try {
-      const [orderResult, summaryResult, profileResult] = await Promise.all([
-        getPanelOrders(token, "company"),
+      const [orderResult, summaryResult, chartsResult, profileResult] =
+        await Promise.all([
+          getPanelOrders(token, "company", { page: 1, pageSize: 25 }),
 
-        getDashboardSummary(token),
+          getDashboardSummary(token),
 
-        getCompanySettings(token),
-      ])
+          getDashboardCharts(token),
+
+          getCompanySettings(token),
+        ])
 
       setOrders(orderResult.orders)
 
+      if (orderResult.pagination) setOrderPage(orderResult.pagination)
+
       setSummary(summaryResult.summary)
+
+      setCharts(chartsResult.charts)
 
       setProfile(profileResult.settings)
     } catch (cause) {
@@ -285,92 +413,138 @@ export default function CompanyDashboard({
     void refresh()
   }, [refresh])
 
-  const filteredOrders = useMemo(() => {
-    const needle = search.toLocaleLowerCase("pt-BR")
+  const filteredOrders = orders
 
-    return orders.filter((order) =>
-      (orderFilter === "all" || order.status !== "CANCELLED") &&
-      [
-          order.publicId,
-          order.requesterName ?? "",
-          order.recipientName,
-          order.deliveryNeighborhood ?? "",
-          order.pickupNeighborhood ?? "",
-        ].some((value) => value.toLocaleLowerCase("pt-BR").includes(needle)),
-    )
-  }, [orderFilter, orders, search])
-
-  const exportCsv = () => {
-    const rows = [
-      [
-        "Número",
-        "Data",
-        "Solicitante",
-        "Telefone do solicitante",
-        "Destinatário",
-        "Telefone do destinatário",
-        "Coleta",
-        "Entrega",
-        "Filial",
-        "Centro de custo",
-        "Valor",
-        "Status",
-      ],
-
-      ...filteredOrders.map((order) => [
-        order.publicId,
-
-        new Date(order.createdAt).toLocaleString("pt-BR"),
-
-        order.requesterName ?? "",
-
-        order.requesterPhone ?? "",
-
-        order.recipientName,
-
-        order.recipientPhone ?? "",
-
-        address(
-          order.pickupStreet,
-          order.pickupNumber,
-          order.pickupNeighborhood,
-        ),
-
-        address(
-          order.deliveryStreet,
-          order.deliveryNumber,
-          order.deliveryNeighborhood,
-        ),
-
-        order.branch?.name ?? "",
-
-        order.costCenter?.name ?? "",
-
-        formatOrderPrice(order),
-
-        order.status,
-      ]),
-    ]
-
-    const csv = rows
-      .map((row) =>
-        row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(";"),
+  const loadOrderPage = async (page: number) => {
+    setLoading(true)
+    setError("")
+    try {
+      const result = await getPanelOrders(token, "company", {
+        page,
+        pageSize: 25,
+        search: search.trim(),
+        status: orderFilter === "completed" ? "COMPLETED" : undefined,
+        from: orderFrom || undefined,
+        to: orderTo || undefined,
+      })
+      setOrders(result.orders)
+      if (result.pagination) setOrderPage(result.pagination)
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Não foi possível carregar as entregas.",
       )
-      .join("\r\n")
+    } finally {
+      setLoading(false)
+    }
+  }
 
-    const url = URL.createObjectURL(
-      new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" }),
-    )
+  const exportCsv = async () => {
+    setError("")
+    try {
+      const query = {
+        pageSize: 100,
+        search: search.trim(),
+        status: orderFilter === "completed" ? "COMPLETED" as const : undefined,
+        from: orderFrom || undefined,
+        to: orderTo || undefined,
+      }
+      const firstPage = await getPanelOrders(token, "company", {
+        ...query,
+        page: 1,
+      })
+      const exportRows = [...firstPage.orders]
+      for (
+        let page = 2;
+        page <= (firstPage.pagination?.totalPages ?? 1);
+        page += 1
+      ) {
+        const result = await getPanelOrders(token, "company", {
+          ...query,
+          page,
+        })
+        exportRows.push(...result.orders)
+      }
+      const rows = [
+        [
+          "Número",
+          "Data",
+          "Solicitante",
+          "Telefone do solicitante",
+          "Destinatário",
+          "Telefone do destinatário",
+          "Coleta",
+          "Entrega",
+          "Filial",
+          "Centro de custo",
+          "Valor",
+          "Status",
+        ],
 
-    const link = document.createElement("a")
+        ...exportRows.map((order) => [
+          order.publicId,
 
-    link.href = url
+          new Date(order.createdAt).toLocaleString("pt-BR"),
 
-    link.download = "procopio-registros-empresa.csv"
+          order.requesterName ?? "",
 
-    link.click()
+          order.requesterPhone ?? "",
 
-    URL.revokeObjectURL(url)
+          order.recipientName,
+
+          order.recipientPhone ?? "",
+
+          address(
+            order.pickupStreet,
+            order.pickupNumber,
+            order.pickupNeighborhood,
+          ),
+
+          address(
+            order.deliveryStreet,
+            order.deliveryNumber,
+            order.deliveryNeighborhood,
+          ),
+
+          order.branch?.name ?? "",
+
+          order.costCenter?.name ?? "",
+
+          formatOrderPrice(order),
+
+          order.status,
+        ]),
+      ]
+
+      const csv = rows
+        .map((row) =>
+          row
+            .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+            .join(";"),
+        )
+        .join("\r\n")
+
+      const url = URL.createObjectURL(
+        new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" }),
+      )
+
+      const link = document.createElement("a")
+
+      link.href = url
+
+      link.download = "procopio-registros-empresa.csv"
+
+      link.click()
+
+      URL.revokeObjectURL(url)
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Não foi possível exportar os registros.",
+      )
+    }
   }
 
   const saveProfile = async () => {
@@ -397,83 +571,112 @@ export default function CompanyDashboard({
     }
   }
 
-  const handleOrganizationFeedback = useCallback((message: string, success = "") => {
-    setError(message)
-    setNotice(success)
-  }, [])
+  const handleOrganizationFeedback = useCallback(
+    (message: string, success = "") => {
+      setError(message)
+      setNotice(success)
+    },
+    [],
+  )
 
   const title = NAV.find((item) => item.id === section)?.label ?? "Visão Geral"
 
   const companyName = profile.name || user.name
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f5f7fb] text-[#1a2b43]">
+    <div className="relative flex h-dvh overflow-hidden bg-[#f5f7fb] text-[#1a2b43] md:h-screen">
+      {mobileMenuOpen && (
+        <button
+          aria-label="Fechar menu"
+          className="fixed inset-0 z-20 bg-slate-950/30 md:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
       <aside
         className={`${
-          sidebarOpen ? "w-[252px]" : "w-[76px]"
-        } flex shrink-0 flex-col border-r border-[#e8edf4] bg-white transition-[width]`}
+          mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+        } fixed inset-y-0 left-0 z-30 flex w-[252px] shrink-0 flex-col border-r border-[#e8edf4] bg-white transition-transform md:static md:z-auto md:translate-x-0 md:transition-[width] ${
+          sidebarOpen ? "md:w-[252px]" : "md:w-[76px]"
+        }`}
       >
         <div
-          className={`flex h-[74px] items-center border-b border-[#edf1f6] px-5 ${
-            sidebarOpen ? "" : "justify-center"
+          className={`flex h-[74px] items-center justify-between border-b border-[#edf1f6] px-5 ${
+            sidebarOpen ? "" : "md:justify-center md:px-3"
           }`}
         >
           <Logo
-            variant={sidebarOpen ? "horizontal" : "icon"}
-            className={
-              sidebarOpen
-                ? "h-8 max-w-[172px] object-contain object-left"
-                : "h-9 w-9 object-contain"
-            }
+            variant="horizontal"
+            className={`h-8 max-w-[172px] object-contain object-left ${
+              sidebarOpen ? "" : "md:hidden"
+            }`}
           />
+          {!sidebarOpen && (
+            <Logo
+              variant="icon"
+              className="hidden h-9 w-9 object-contain md:block"
+            />
+          )}
+          <button
+            onClick={() => setMobileMenuOpen(false)}
+            aria-label="Fechar menu lateral"
+            className="grid h-8 w-8 place-items-center rounded-lg text-[#718096] hover:bg-[#f5f7fb] md:hidden"
+          >
+            <X size={17} />
+          </button>
         </div>
-        {sidebarOpen && (
-          <div className="mx-4 mt-4 rounded-xl border border-[#e8edf4] bg-[#f8fafc] px-3 py-2.5">
-            <b className="block truncate text-[11px] text-[#102b55]">
-              {companyName}
-            </b>
-            <small className="mt-1 block text-[10px] text-[#8795a8]">
-              Plano empresarial
-            </small>
-          </div>
-        )}
+        <div
+          className={`mx-4 mt-4 rounded-xl border border-[#e8edf4] bg-[#f8fafc] px-3 py-2.5 ${
+            sidebarOpen ? "" : "md:hidden"
+          }`}
+        >
+          <b className="block truncate text-[11px] text-[#102b55]">
+            {companyName}
+          </b>
+          <small className="mt-1 block text-[10px] text-[#8795a8]">
+            Plano empresarial
+          </small>
+        </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {NAV.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               title={label}
-              onClick={() => setSection(id)}
-              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-semibold transition ${
+              onClick={() => {
+                setSection(id)
+                setMobileMenuOpen(false)
+              }}
+              aria-current={section === id ? "page" : undefined}
+              className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-semibold transition-colors duration-200 ${
                 section === id
-                  ? "bg-[#f47b20] text-white shadow-sm shadow-orange-200"
-                  : "text-[#718096] hover:bg-[#f5f7fb] hover:text-[#102b55]"
+                  ? "bg-[#effaff] text-[#0f3266] shadow-[inset_3px_0_0_#ff7a18]"
+                  : "text-[#52657f] hover:bg-[#f7f9fc] hover:text-[#0f3266]"
               } ${sidebarOpen ? "" : "justify-center"}`}
             >
               <Icon size={17} />
-              {sidebarOpen && <span>{label}</span>}
+              <span className={sidebarOpen ? "" : "md:hidden"}>{label}</span>
             </button>
           ))}
         </nav>
-        {sidebarOpen && (
-          <div className="mx-4 mb-3 flex items-center gap-2.5 rounded-xl bg-[#f8fafc] p-3">
-            <span className="grid h-8 w-8 place-items-center rounded-full bg-[#ffead8] text-xs font-bold text-[#c76216]">
-              {user.name
-                .split(" ")
-                .slice(0, 2)
-                .map((part) => part[0])
-                .join("")
-                .toUpperCase()}
-            </span>
-            <div className="min-w-0 flex-1">
-              <b className="block truncate text-xs text-[#102b55]">
-                {user.name}
-              </b>
-              <small className="text-[10px] text-[#8795a8]">
-                Gestor empresarial
-              </small>
-            </div>
+        <div
+          className={`mx-4 mb-3 flex items-center gap-2.5 rounded-xl bg-[#f8fafc] p-3 ${
+            sidebarOpen ? "" : "md:hidden"
+          }`}
+        >
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-[#ffead8] text-xs font-bold text-[#c76216]">
+            {user.name
+              .split(" ")
+              .slice(0, 2)
+              .map((part) => part[0])
+              .join("")
+              .toUpperCase()}
+          </span>
+          <div className="min-w-0 flex-1">
+            <b className="block truncate text-xs text-[#102b55]">{user.name}</b>
+            <small className="text-[10px] text-[#8795a8]">
+              Gestor empresarial
+            </small>
           </div>
-        )}
+        </div>
         <div className="border-t border-[#edf1f6] p-3">
           <button
             onClick={onLogout}
@@ -483,20 +686,35 @@ export default function CompanyDashboard({
             }`}
           >
             <LogOut size={16} />
-            {sidebarOpen && "Sair"}
+            <span className={sidebarOpen ? "" : "md:hidden"}>Sair</span>
           </button>
         </div>
       </aside>
 
       <main className="min-w-0 flex-1 overflow-y-auto">
-        <header className="sticky top-0 z-10 flex min-h-[74px] items-center justify-between gap-4 border-b border-[#e8edf4] bg-white/95 px-5 py-3 backdrop-blur sm:px-7">
+        <header className="sticky top-0 z-10 flex min-h-[74px] items-center justify-between gap-2 border-b border-[#e8edf4] bg-white/95 px-3 py-3 backdrop-blur sm:gap-4 sm:px-7">
           <div className="flex min-w-0 items-center gap-3">
             <button
-              onClick={() => setSidebarOpen((value) => !value)}
-              aria-label="Alternar menu"
-              className="rounded-lg p-2 text-[#718096] hover:bg-[#f5f7fb]"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Abrir menu lateral"
+              aria-expanded={mobileMenuOpen}
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-[#e8edf4] text-[#718096] md:hidden"
             >
-              <BarChart3 size={17} />
+              <Menu size={17} />
+            </button>
+            <button
+              onClick={() => setSidebarOpen((value) => !value)}
+              aria-label={
+                sidebarOpen ? "Recolher menu lateral" : "Expandir menu lateral"
+              }
+              aria-expanded={sidebarOpen}
+              className="hidden h-9 w-9 place-items-center rounded-xl border border-[#e8edf4] text-[#718096] hover:bg-[#f8fafc] md:grid"
+            >
+              {sidebarOpen ? (
+                <PanelLeftClose size={17} />
+              ) : (
+                <PanelLeftOpen size={17} />
+              )}
             </button>
             <div className="min-w-0">
               <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-[#f47b20]">
@@ -507,7 +725,7 @@ export default function CompanyDashboard({
               </h1>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <label className="relative hidden w-48 md:block xl:w-64">
               <Search
                 size={14}
@@ -530,7 +748,7 @@ export default function CompanyDashboard({
             {user.companyPermission !== "RESTRICTED" && (
               <button
                 onClick={onNewOrder}
-                className="flex h-9 items-center gap-2 rounded-xl bg-[#f47b20] px-3 text-xs font-bold text-white transition hover:bg-[#df6d17] sm:px-4"
+                className="flex h-9 items-center gap-1.5 rounded-xl bg-[#f47b20] px-2.5 text-[11px] font-bold text-white transition hover:bg-[#df6d17] sm:gap-2 sm:px-4 sm:text-xs"
               >
                 <Package size={14} /> Registrar pedido
               </button>
@@ -576,7 +794,7 @@ export default function CompanyDashboard({
                   Atualizado em {new Date().toLocaleDateString("pt-BR")}
                 </span>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 <MetricCard
                   label="Entregas hoje"
                   value={`${summary.today.orders}`}
@@ -613,37 +831,37 @@ export default function CompanyDashboard({
                   tone="bg-[#fff5e7] text-[#c88724]"
                 />
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <MetricCard
-                  label="Gasto hoje"
+                  label="Valor dos pedidos hoje"
                   value={money(summary.today.total)}
                   detail={`${summary.today.orders} entregas`}
                   icon={CircleDollarSign}
                   tone="bg-[#fff3e9] text-[#e97820]"
                 />
                 <MetricCard
-                  label="Gasto semana"
+                  label="Valor dos pedidos na semana"
                   value={money(summary.week.total)}
                   detail={`${summary.week.orders} entregas`}
                   icon={CircleDollarSign}
                   tone="bg-[#edf5ff] text-[#3778c2]"
                 />
                 <MetricCard
-                  label="Gasto mês"
+                  label="Valor dos pedidos no mês"
                   value={money(summary.month.total)}
                   detail={`${summary.month.orders} entregas`}
                   icon={CircleDollarSign}
                   tone="bg-[#eff9f2] text-[#3d9a62]"
                 />
                 <MetricCard
-                  label="Gasto total"
+                  label="Valor registrado nos pedidos"
                   value={money(summary.allTime.total)}
                   detail="Histórico consolidado"
                   icon={CircleDollarSign}
                   tone="bg-[#f1edff] text-[#785cc2]"
                 />
               </div>
-              <DashboardChartsPanel orders={orders} />
+              <DashboardChartsPanel data={charts} />
             </div>
           )}
 
@@ -655,17 +873,15 @@ export default function CompanyDashboard({
                     Entregas registradas
                   </h2>
                   <p className="mt-1 text-xs text-[#8795a8]">
-                    Até os 100 registros mais recentes da empresa.
+                    Histórico completo da empresa, com filtros e paginação.
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
                   <div className="flex rounded-xl border border-[#e8edf4] bg-white p-1">
-                    {(
-                      [
-                        ["all", "Todos"],
-                        ["completed", "Concluídas"],
-                      ] as const
-                    ).map(([filter, label]) => (
+                    {([
+                      ["all", "Todos"],
+                      ["completed", "Concluídas"],
+                    ] as const).map(([filter, label]) => (
                       <button
                         key={filter}
                         onClick={() => setOrderFilter(filter)}
@@ -679,7 +895,7 @@ export default function CompanyDashboard({
                       </button>
                     ))}
                   </div>
-                  <label className="relative md:hidden">
+                  <label className="relative basis-full md:hidden">
                     <Search
                       size={14}
                       className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9aa8b8]"
@@ -688,32 +904,85 @@ export default function CompanyDashboard({
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
                       placeholder="Buscar…"
-                      className="h-9 w-40 rounded-xl border border-[#e8edf4] bg-white pl-9 pr-3 text-xs"
+                      className="h-9 w-full rounded-xl border border-[#e8edf4] bg-white pl-9 pr-3 text-xs"
                     />
                   </label>
                   <button
-                    onClick={exportCsv}
-                    className="flex h-9 items-center gap-2 rounded-xl border border-[#e8edf4] bg-white px-3 text-xs font-bold text-[#102b55]"
+                    onClick={() => void exportCsv()}
+                    disabled={loading}
+                    className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-[#e8edf4] bg-white px-2.5 text-[11px] font-bold text-[#102b55] sm:gap-2 sm:px-3 sm:text-xs"
                   >
                     <Download size={14} /> Exportar
                   </button>
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-2 rounded-2xl border border-[#e8edf4] bg-white p-3 sm:grid-cols-[minmax(0,1fr)_minmax(150px,220px)_minmax(150px,220px)_auto]">
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Número, solicitante, destinatário ou bairro"
+                  className="col-span-2 h-10 min-w-0 rounded-xl border border-[#e2e8f0] px-3 text-xs sm:col-span-1"
+                />
+                <label className="text-[10px] text-[#718096]">
+                  De
+                  <input
+                    type="date"
+                    value={orderFrom}
+                    onChange={(event) => setOrderFrom(event.target.value)}
+                    className="mt-1 block h-9 w-full rounded-lg border border-[#e2e8f0] px-2 text-xs"
+                  />
+                </label>
+                <label className="text-[10px] text-[#718096]">
+                  Até
+                  <input
+                    type="date"
+                    value={orderTo}
+                    onChange={(event) => setOrderTo(event.target.value)}
+                    className="mt-1 block h-9 w-full rounded-lg border border-[#e2e8f0] px-2 text-xs"
+                  />
+                </label>
+                <button
+                  onClick={() => void loadOrderPage(1)}
+                  disabled={loading}
+                  className="col-span-2 h-10 self-end rounded-xl bg-[#0c225a] px-3 text-xs font-bold text-white disabled:opacity-50 sm:col-span-1"
+                >
+                  Aplicar filtros
+                </button>
+              </div>
               <p className="text-xs text-[#8795a8]">
-                As solicitações do portal são registradas como concluídas.
-                Registros cancelados permanecem no histórico e aparecem em
-                “Todos”.
+                As solicitações do portal são consideradas concluídas quando
+                finalizadas ou entregues. Registros cancelados permanecem no
+                histórico e aparecem em “Todos”.
               </p>
               <OrdersTable orders={filteredOrders} />
+              <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[#718096]">
+                <span>
+                  {orderPage.total.toLocaleString("pt-BR")} entregas encontradas
+                  · página {orderPage.page} de{" "}
+                  {Math.max(1, orderPage.totalPages)}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    disabled={orderPage.page <= 1 || loading}
+                    onClick={() => void loadOrderPage(orderPage.page - 1)}
+                    className="rounded-lg border border-[#e8edf4] bg-white px-3 py-2 disabled:opacity-40"
+                  >
+                    Anterior
+                  </button>
+                  <button
+                    disabled={orderPage.page >= orderPage.totalPages || loading}
+                    onClick={() => void loadOrderPage(orderPage.page + 1)}
+                    className="rounded-lg border border-[#e8edf4] bg-white px-3 py-2 disabled:opacity-40"
+                  >
+                    Próxima
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
           {section === "intelligence" && (
-            <IntelligencePanel
-              orders={orders}
-              summary={summary}
-              companyName={companyName}
-            />
+            <IntelligencePanel token={token} companyName={companyName} />
           )}
 
           {section === "finance" && (
@@ -721,40 +990,23 @@ export default function CompanyDashboard({
               <div>
                 <h2 className="text-lg font-bold text-[#102b55]">Financeiro</h2>
                 <p className="mt-1 text-xs text-[#8795a8]">
-                  Despesas calculadas a partir dos pedidos registrados.
+                  Valores informativos registrados nas solicitações da empresa.
                 </p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="max-w-xl">
                 <MetricCard
-                  label="Gasto hoje"
-                  value={money(summary.today.total)}
-                  detail={`${summary.today.orders} pedidos`}
-                  icon={CircleDollarSign}
-                  tone="bg-[#fff3e9] text-[#e97820]"
-                />
-                <MetricCard
-                  label="Gasto semana"
-                  value={money(summary.week.total)}
-                  detail={`${summary.week.orders} pedidos`}
-                  icon={CircleDollarSign}
-                  tone="bg-[#edf5ff] text-[#3778c2]"
-                />
-                <MetricCard
-                  label="Gasto mês"
-                  value={money(summary.month.total)}
-                  detail={`${summary.month.orders} pedidos`}
-                  icon={CircleDollarSign}
-                  tone="bg-[#eff9f2] text-[#3d9a62]"
-                />
-                <MetricCard
-                  label="Gasto total"
+                  label="Valor total registrado nos pedidos"
                   value={money(summary.allTime.total)}
-                  detail={`${summary.allTime.orders} pedidos · média ${money(summary.allTime.average)}`}
+                  detail={`${summary.allTime.orders} pedidos · média de ${money(summary.allTime.average)} por pedido`}
                   icon={CircleDollarSign}
                   tone="bg-[#f1edff] text-[#785cc2]"
                 />
               </div>
-              <DashboardChartsPanel orders={orders} />
+              <div className="max-w-3xl rounded-2xl border border-[#f1d6b8] bg-[#fffaf4] p-4 text-sm text-[#76522f]">
+                Esses valores refletem os preços registrados nos pedidos; não
+                confirmam pagamentos ou recebimentos e não representam saldo
+                conciliado. A conciliação financeira ainda não está disponível.
+              </div>
             </div>
           )}
 

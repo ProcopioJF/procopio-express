@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "vercel-build": "npm run prisma:generate && npm run backend:build && npm run build",
     "preview": "vite preview",
     "format": "oxfmt",
     "backend:dev": "tsx watch backend/src/server.ts",
@@ -15,7 +16,8 @@
     "prisma:migrate": "prisma migrate dev --schema backend/prisma/schema.prisma",
     "prisma:migrate:status": "prisma migrate status --schema backend/prisma/schema.prisma",
     "prisma:migrate:deploy": "prisma migrate deploy --schema backend/prisma/schema.prisma",
-    "prisma:seed": "tsx backend/prisma/seed.ts"
+    "prisma:seed": "tsx backend/prisma/seed.ts",
+    "intelligence:test-seed": "tsx backend/prisma/intelligence-test-seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

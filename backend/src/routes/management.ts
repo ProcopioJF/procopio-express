@@ -5,6 +5,7 @@ import {
   companyCostCenterSchema,
   companyMemberSchema,
   companyMemberUpdateSchema,
+  financialEntryListQuerySchema,
   financialEntrySchema,
   leadSchema,
   planSchema,
@@ -18,7 +19,11 @@ import {
   systemUserSchema,
 } from "../validation.js";
 import { hashPassword } from "../auth.js";
-import { config, databaseConfigured } from "../config.js";
+import {
+  config,
+  databaseConfigured,
+  getWhatsAppIntegrationReadiness,
+} from "../config.js";
 import { prisma } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
 import { HttpError } from "../middleware/errors.js";
@@ -179,13 +184,37 @@ adminRouter.patch("/subscriptions/:id", route(async (req, res) => {
   res.json({ subscription });
 }));
 
-adminRouter.get("/financial-entries", route(async (_req, res) => {
-  const entries = await prisma.financialEntry.findMany({
-    orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
-    take: 500,
-    include: { company: { select: { id: true, name: true } } },
-  });
-  res.json({ entries });
+adminRouter.get("/financial-entries", route(async (req, res) => {
+  const { offset, limit, search, type, from, to } = financialEntryListQuerySchema.parse(req.query);
+  const where: Prisma.FinancialEntryWhereInput = {
+    ...(type ? { type } : {}),
+    ...(from || to ? {
+      occurredAt: {
+        ...(from ? { gte: new Date(`${from}T03:00:00.000Z`) } : {}),
+        ...(to
+          ? { lt: new Date(new Date(`${to}T03:00:00.000Z`).getTime() + 86_400_000) }
+          : {}),
+      },
+    } : {}),
+    ...(search ? {
+      OR: [
+        { description: { contains: search, mode: "insensitive" } },
+        { category: { contains: search, mode: "insensitive" } },
+        { company: { is: { name: { contains: search, mode: "insensitive" } } } },
+      ],
+    } : {}),
+  };
+  const [entries, total] = await prisma.$transaction([
+    prisma.financialEntry.findMany({
+      where,
+      orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
+      skip: offset,
+      take: limit,
+      include: { company: { select: { id: true, name: true } } },
+    }),
+    prisma.financialEntry.count({ where }),
+  ]);
+  res.json({ entries, total });
 }));
 
 adminRouter.post("/financial-entries", route(async (req, res) => {
@@ -290,7 +319,13 @@ adminRouter.patch("/system-users/:id", route(async (req, res) => {
 }));
 
 adminRouter.get("/integrations", route(async (_req, res) => {
-  const whatsappConfigured = Boolean(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
+  const whatsapp = getWhatsAppIntegrationReadiness({
+    accessToken: config.whatsappToken,
+    phoneNumberId: config.whatsappPhoneNumberId,
+    operationsNumber: config.whatsappOperationsNumber,
+    verifyToken: config.whatsappVerifyToken,
+    appSecret: config.whatsappAppSecret,
+  });
   const routingConfigured = config.perKmPricingEnabled && Boolean(config.routingApiUrl);
   res.json({
     integrations: [
@@ -305,8 +340,8 @@ adminRouter.get("/integrations", route(async (_req, res) => {
         id: "whatsapp",
         name: "WhatsApp Business",
         description: "Notificações operacionais pelo WhatsApp Business Platform.",
-        status: whatsappConfigured ? "ACTIVE" : "SETUP_REQUIRED",
-        note: whatsappConfigured ? "Credenciais da Meta configuradas." : "Configure as credenciais e o webhook da Meta.",
+        status: whatsapp.status,
+        note: whatsapp.note,
       },
       {
         id: "routing",

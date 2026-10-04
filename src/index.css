@@ -5,42 +5,42 @@
   --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'DM Mono', ui-monospace, monospace;
 
-  --color-navy-950: #080f2a;
-  --color-navy-900: #0a1843;
-  --color-navy-800: #0c225a;
-  --color-navy-700: #102870;
-  --color-navy-600: #163690;
-  --color-navy-500: #1c45b0;
-  --color-navy-400: #2557d6;
-  --color-navy-300: #6b93f0;
-  --color-navy-200: #b0c8fa;
-  --color-navy-100: #dce8ff;
-  --color-navy-50: #f0f5ff;
+  --color-navy-950: #102a43;
+  --color-navy-900: #0b2852;
+  --color-navy-800: #0f3266;
+  --color-navy-700: #17447f;
+  --color-navy-600: #205b9c;
+  --color-navy-500: #2876b8;
+  --color-navy-400: #3994d1;
+  --color-navy-300: #76b9e5;
+  --color-navy-200: #b8dcf2;
+  --color-navy-100: #dceef9;
+  --color-navy-50: #eff7fc;
 
-  --color-brand-600: #d96810;
-  --color-brand-500: #f47b20;
-  --color-brand-400: #f89040;
-  --color-brand-300: #fbaa70;
-  --color-brand-100: #fde8d0;
-  --color-brand-50: #fff5eb;
+  --color-brand-600: #e7650b;
+  --color-brand-500: #ff7a18;
+  --color-brand-400: #ff9648;
+  --color-brand-300: #ffb77e;
+  --color-brand-100: #ffe7d3;
+  --color-brand-50: #fff6ef;
 
-  --color-sky-600: #0a90e0;
-  --color-sky-500: #1aa8f5;
-  --color-sky-400: #38b6ff;
-  --color-sky-300: #70ccff;
-  --color-sky-100: #d0edff;
-  --color-sky-50: #eaf6ff;
+  --color-sky-600: #1789bf;
+  --color-sky-500: #39b5ee;
+  --color-sky-400: #65c9f4;
+  --color-sky-300: #9cddf8;
+  --color-sky-100: #d9f2fc;
+  --color-sky-50: #effaff;
 
-  --color-surface: #f4f6fa;
+  --color-surface: #f7f9fc;
   --color-surface-card: #ffffff;
-  --color-border: #e2e8f0;
-  --color-border-dark: #cbd5e1;
+  --color-border: #e5eaf0;
+  --color-border-dark: #cbd5df;
 
-  --color-success-500: #10b981;
-  --color-success-100: #d1fae5;
+  --color-success-500: #16a34a;
+  --color-success-100: #dcfce7;
   --color-warning-500: #f59e0b;
   --color-warning-100: #fef3c7;
-  --color-danger-500: #ef4444;
+  --color-danger-500: #dc2626;
   --color-danger-100: #fee2e2;
   --color-info-500: #3b82f6;
   --color-info-100: #dbeafe;
@@ -53,13 +53,74 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
-html { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; }
+html {
+  font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  color-scheme: light;
+}
 
 body {
   margin: 0;
-  background-color: #f4f6fa;
-  color: #0f172a;
+  background-color: #f7f9fc;
+  color: #102a43;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+}
+
+button, a, input, select, textarea {
+  transition-timing-function: cubic-bezier(0.2, 0.65, 0.3, 1);
+}
+
+button, a, input, select, textarea {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 180ms;
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  border-color: #e5eaf0;
+  border-radius: 10px;
+  background-color: #fff;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #39b5ee;
+  outline-offset: 1px;
+}
+
+button:focus-visible, a:focus-visible {
+  outline: 2px solid #39b5ee;
+  outline-offset: 3px;
+}
+
+::selection {
+  color: #102a43;
+  background: #d9f2fc;
+}
+
+.rounded-2xl[class*="border"][class*="bg-white"] {
+  border-color: #e5eaf0;
+  box-shadow: 0 2px 10px rgb(16 42 67 / 4%);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .rounded-2xl[class*="border"][class*="bg-white"]:hover {
+    box-shadow: 0 6px 18px rgb(16 42 67 / 7%);
+  }
+
+  button:not(:disabled):hover {
+    filter: brightness(0.98);
+  }
+}
+
+button:not(:disabled):active {
+  transform: scale(0.985);
 }
 
 ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -99,3 +160,24 @@ body {
 
 /* Chart tooltip */
 .recharts-tooltip-wrapper { outline: none; }
+
+@media (max-width: 640px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto"
 
+import { spawnSync } from "node:child_process"
+
 import { readFileSync } from "node:fs"
 
 import { resolve } from "node:path"
 
-import { Prisma, PrismaClient } from "@prisma/client"
+import { Prisma, PrismaClient, RoleName } from "@prisma/client"
 
+import bcrypt from "bcryptjs"
 import dotenv from "dotenv"
-
-const seedConfirmation = "I_UNDERSTAND_TEST_DATA_ONLY"
+import { validateIntelligenceTestSeedEnvironment } from "./intelligence-test-seed-config.js"
 
 const testEnvPath = resolve(process.cwd(), "backend/.env.test")
 
@@ -22,122 +24,29 @@ function readEnvironmentFile(path: string) {
   }
 }
 
-function supabaseProjectRef(databaseUrl: string, label: string) {
-  let parsed: URL
-
-  try {
-    parsed = new URL(databaseUrl)
-  } catch {
-    throw new Error(`${label} não é uma URL de banco válida.`)
-  }
-
-  if (!["postgres:", "postgresql:"].includes(parsed.protocol)) {
-    throw new Error(`${label} deve usar PostgreSQL.`)
-  }
-
-  const directHost = parsed.hostname.match(/^db\.([a-z0-9]+)\.supabase\.co$/i)
-
-  if (directHost) return directHost[1].toLowerCase()
-
-  if (parsed.hostname.endsWith(".pooler.supabase.com")) {
-    const poolerUser = decodeURIComponent(parsed.username).match(
-      /^postgres\.([a-z0-9]+)$/i,
-    )
-
-    if (poolerUser) return poolerUser[1].toLowerCase()
-  }
-
-  throw new Error(
-    `${label} não permite identificar o project ref Supabase; execução recusada.`,
-  )
-}
-
-function loadTestDatabaseUrl() {
+function loadTestEnvironment() {
   const testEnvironment = readEnvironmentFile(testEnvPath)
-
-  const testUrl = testEnvironment.INTELLIGENCE_TEST_DATABASE_URL
-
-  const expectedProjectRef =
-    testEnvironment.INTELLIGENCE_TEST_PROJECT_REF?.toLowerCase()
-
-  if (
-    process.env.NODE_ENV === "production" ||
-    testEnvironment.NODE_ENV !== "test"
-  ) {
-    throw new Error(
-      "Seed recusado: configure NODE_ENV=test somente no .env.test.",
-    )
-  }
-
-  if (testEnvironment.INTELLIGENCE_SEED_CONFIRM !== seedConfirmation) {
-    throw new Error(
-      "Seed recusado: a confirmação de ambiente de teste está ausente ou inválida.",
-    )
-  }
-
-  if (!testUrl || !expectedProjectRef) {
-    throw new Error(
-      "Seed recusado: configure INTELLIGENCE_TEST_DATABASE_URL e INTELLIGENCE_TEST_PROJECT_REF em .env.test.",
-    )
-  }
-
-  const actualTestProjectRef = supabaseProjectRef(
-    testUrl,
-    "INTELLIGENCE_TEST_DATABASE_URL",
-  )
-
-  if (actualTestProjectRef !== expectedProjectRef) {
-    throw new Error(
-      "Seed recusado: o project ref da URL não corresponde ao ref de teste declarado.",
-    )
-  }
-
   const primaryEnvironmentFiles = [
     readEnvironmentFile(resolve(process.cwd(), ".env")),
-
     readEnvironmentFile(resolve(process.cwd(), "backend/.env")),
   ]
-
-  const primaryUrls = new Set(
-    [
-      process.env.DATABASE_URL,
-
-      ...primaryEnvironmentFiles.map((environment) => environment.DATABASE_URL),
-    ].filter((value): value is string => Boolean(value)),
+  const primaryDatabaseUrls = [
+    process.env.DATABASE_URL,
+    ...primaryEnvironmentFiles.map((environment) => environment.DATABASE_URL),
+  ].filter((value): value is string => Boolean(value))
+  return validateIntelligenceTestSeedEnvironment(
+    testEnvironment,
+    primaryDatabaseUrls,
+    process.env.NODE_ENV,
+    process.env.INTELLIGENCE_TEST_ALLOW_PRIMARY_DATABASE === "true",
   )
-
-  for (const primaryUrl of primaryUrls) {
-    let primaryHost: string
-
-    try {
-      primaryHost = new URL(primaryUrl).hostname
-    } catch {
-      throw new Error(
-        "Seed recusado: DATABASE_URL principal não é uma URL válida.",
-      )
-    }
-
-    if (["localhost", "127.0.0.1", "::1"].includes(primaryHost)) continue
-
-    const primaryProjectRef = supabaseProjectRef(
-      primaryUrl,
-      "DATABASE_URL principal",
-    )
-
-    if (primaryProjectRef === actualTestProjectRef) {
-      throw new Error(
-        "Seed recusado: o project ref de teste coincide com uma conexão principal configurada localmente.",
-      )
-    }
-  }
-
-  return testUrl
 }
 
 const profiles = [
   {
     document: "TEST-PROCOPIO-INTEL-001",
     name: "Mercado Horizonte Teste",
+    email: "intelligence.company.1@test.invalid",
     neighborhood: "Centro",
     frequency: 1,
   },
@@ -145,6 +54,7 @@ const profiles = [
   {
     document: "TEST-PROCOPIO-INTEL-002",
     name: "Farmácia Vila Exemplo",
+    email: "intelligence.company.2@test.invalid",
     neighborhood: "São Mateus",
     frequency: 2,
   },
@@ -152,12 +62,15 @@ const profiles = [
   {
     document: "TEST-PROCOPIO-INTEL-003",
     name: "Ateliê Rota Fictícia",
+    email: "intelligence.company.3@test.invalid",
     neighborhood: "Cascatinha",
     frequency: 3,
   },
 ] as const
 
 const monthlyOrdersPerCompany = 24
+const testAdminEmail = "admin.intelligence@test.invalid"
+const testAdminName = "Admin Intelligence Teste"
 interface SeedCount {
   company: string
   orders: number
@@ -166,7 +79,7 @@ const monthStarts = (() => {
   const now = new Date()
 
   return Array.from(
-    { length: 6 },
+    { length: 7 },
     (_, index) =>
       new Date(
         Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 6 + index, 1),
@@ -196,9 +109,17 @@ function buildOrders(
     const daysInMonth = Math.round(
       (nextMonth.getTime() - month.getTime()) / (24 * 60 * 60 * 1000),
     )
+    const now = new Date()
+    const isCurrentMonth =
+      month.getUTCFullYear() === now.getUTCFullYear() &&
+      month.getUTCMonth() === now.getUTCMonth()
+    const availableDays = isCurrentMonth ? now.getUTCDate() : daysInMonth
 
-    return Array.from({ length: monthlyOrdersPerCompany }, (_, orderIndex) => {
-      const day = 1 + ((orderIndex * 7 + profileIndex * 3) % daysInMonth)
+    const monthlyOrderCount =
+      monthlyOrdersPerCompany * profiles[profileIndex].frequency
+
+    return Array.from({ length: monthlyOrderCount }, (_, orderIndex) => {
+      const day = 1 + ((orderIndex * 7 + profileIndex * 3) % availableDays)
 
       const hour = 8 + ((orderIndex * (profileIndex + 2) + monthIndex) % 10)
 
@@ -251,6 +172,13 @@ function buildOrders(
         complemento: "",
       }
 
+      const hasDistance = orderIndex % 5 !== 0
+      const distance = hasDistance
+        ? Number(
+            (2.5 + ((orderIndex * 7 + profileIndex * 3) % 185) / 10).toFixed(1),
+          )
+        : null
+
       return {
         id: randomUUID(),
 
@@ -288,13 +216,17 @@ function buildOrders(
 
         recipientPhone: "00000000000",
 
-        requesterName: "Solicitante fictício de teste",
+        requesterName: `Solicitante fictício ${profileIndex + 1}`,
 
         requesterPhone: "00000000000",
 
         notes: "Registro sintético para homologação; não realizar entrega.",
 
         price: 10 + ((profileIndex * 7 + orderIndex * 3 + monthIndex) % 23),
+
+        distance,
+
+        perKmRate: hasDistance ? 1.3 : null,
 
         companyId,
 
@@ -308,8 +240,37 @@ function buildOrders(
   })
 }
 
+function applyTestMigrations(databaseUrl: string) {
+  const prismaCli = resolve(process.cwd(), "node_modules/prisma/build/index.js")
+  const result = spawnSync(
+    process.execPath,
+    [
+      prismaCli,
+      "migrate",
+      "deploy",
+      "--schema",
+      "backend/prisma/schema.prisma",
+    ],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, DATABASE_URL: databaseUrl, NODE_ENV: "test" },
+      stdio: "inherit",
+    },
+  )
+
+  if (result.error) throw result.error
+  if (result.status !== 0) {
+    throw new Error(
+      `Seed recusado: a aplicação das migrations no Supabase isolado falhou (código ${result.status ?? "indisponível"}).`,
+    )
+  }
+}
+
 async function main() {
-  const databaseUrl = loadTestDatabaseUrl()
+  const { databaseUrl, userPassword } = loadTestEnvironment()
+  const passwordHash = await bcrypt.hash(userPassword, 12)
+
+  applyTestMigrations(databaseUrl)
 
   const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } })
 
@@ -338,43 +299,128 @@ async function main() {
       )
     }
 
-    const counts = await prisma.$transaction(async (transaction) => {
-      const result: SeedCount[] = []
-
-      for (const [profileIndex, profile] of profiles.entries()) {
-        const company = await transaction.company.upsert({
-          where: { document: profile.document },
-
+    const counts = await prisma.$transaction(
+      async (transaction) => {
+        const result: SeedCount[] = []
+        const adminRole = await transaction.role.upsert({
+          where: { name: RoleName.ADMIN },
           update: {},
+          create: { name: RoleName.ADMIN },
+        })
+        const companyRole = await transaction.role.upsert({
+          where: { name: RoleName.COMPANY },
+          update: {},
+          create: { name: RoleName.COMPANY },
+        })
 
-          create: {
-            document: profile.document,
-
-            name: profile.name,
-
-            email: `teste-${profileIndex + 1}@example.invalid`,
-
-            phone: "00000000000",
-
-            intelligenceEnabled: false,
+        const existingAdmin = await transaction.user.findUnique({
+          where: { email: testAdminEmail },
+          select: { roleId: true, companyId: true, name: true },
+        })
+        if (
+          existingAdmin &&
+          (existingAdmin.roleId !== adminRole.id ||
+            existingAdmin.companyId ||
+            existingAdmin.name !== testAdminName)
+        ) {
+          throw new Error(
+            "Seed recusado: a conta reservada de Admin Intelligence já pertence a outro perfil.",
+          )
+        }
+        await transaction.user.upsert({
+          where: { email: testAdminEmail },
+          update: {
+            name: testAdminName,
+            passwordHash,
+            isActive: true,
           },
-
-          select: { id: true, name: true },
+          create: {
+            email: testAdminEmail,
+            name: testAdminName,
+            passwordHash,
+            roleId: adminRole.id,
+          },
         })
 
-        await transaction.order.deleteMany({
-          where: { companyId: company.id, isSeed: true },
-        })
+        for (const [profileIndex, profile] of profiles.entries()) {
+          const existingCompany = await transaction.company.findUnique({
+            where: { document: profile.document },
+            select: { name: true },
+          })
+          if (existingCompany && existingCompany.name !== profile.name) {
+            throw new Error(
+              `Seed recusado: o documento reservado da empresa ${profile.name} já está em uso.`,
+            )
+          }
+          const company = await transaction.company.upsert({
+            where: { document: profile.document },
 
-        const orders = buildOrders(company.id, profileIndex)
+            update: {
+              name: profile.name,
+              intelligenceEnabled: true,
+            },
 
-        const inserted = await transaction.order.createMany({ data: orders })
+            create: {
+              document: profile.document,
 
-        result.push({ company: company.name, orders: inserted.count })
-      }
+              name: profile.name,
 
-      return result
-    }, { maxWait: 15_000, timeout: 60_000 })
+              email: profile.email,
+
+              phone: "00000000000",
+
+              intelligenceEnabled: true,
+            },
+
+            select: { id: true, name: true },
+          })
+
+          const existingCompanyUser = await transaction.user.findUnique({
+            where: { email: profile.email },
+            select: { roleId: true, companyId: true },
+          })
+          if (
+            existingCompanyUser &&
+            (existingCompanyUser.roleId !== companyRole.id ||
+              existingCompanyUser.companyId !== company.id)
+          ) {
+            throw new Error(
+              `Seed recusado: a conta reservada ${profile.email} já pertence a outro perfil.`,
+            )
+          }
+          await transaction.user.upsert({
+            where: { email: profile.email },
+            update: {
+              name: profile.name,
+              passwordHash,
+              companyId: company.id,
+              roleId: companyRole.id,
+              isActive: true,
+            },
+            create: {
+              email: profile.email,
+              name: profile.name,
+              passwordHash,
+              companyId: company.id,
+              roleId: companyRole.id,
+            },
+          })
+
+          await transaction.order.deleteMany({
+            where: { companyId: company.id, isSeed: true },
+          })
+
+          const orders = buildOrders(company.id, profileIndex)
+
+          const inserted = await transaction.order.createMany({ data: orders })
+
+          result.push({ company: company.name, orders: inserted.count })
+        }
+
+        return result
+      },
+      { maxWait: 15_000, timeout: 60_000 },
+    )
 
     for (const count of counts) {
       console.log(
@@ -382,6 +428,13 @@ async function main() {
       )
     }
 
+    console.log(`Conta Admin para homologação: ${testAdminEmail}`)
+    for (const profile of profiles) {
+      console.log(`Conta Empresa para homologação: ${profile.email}`)
+    }
+    console.log(
+      "Use a senha privada definida em INTELLIGENCE_TEST_USER_PASSWORD; ela não é exibida pelo script.",
+    )
     console.log(
       "Seed concluído somente no project ref Supabase de teste configurado.",
     )

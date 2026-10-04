@@ -53,9 +53,36 @@ export function DeliveryMap({ pickup, delivery }: Props) {
     }
   }, [pickup?.latitude, pickup?.longitude, delivery?.latitude, delivery?.longitude]);
 
-  return <div className="map-wrap"><div ref={ref} className="delivery-map" /><p className="map-provider">Mapa gratuito via OpenStreetMap</p>{(!pickup || !delivery) && <p className="map-warning">Complete os endereços para exibir os dois pontos.</p>}<div className="map-actions"><MapStatus color="blue" found={!!pickup} label="Coleta" /><MapStatus color="orange" found={!!delivery} label="Entrega" /></div></div>;
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-[#eff7fc] p-3">
+      <div ref={ref} className="delivery-map min-h-[220px] w-full flex-1 rounded-lg" />
+      <p className="mt-2 text-[10px] text-[#64748b]">
+        Mapa gratuito via OpenStreetMap
+      </p>
+      {(!pickup || !delivery) && (
+        <p className="mt-1 text-[11px] text-[#9b641c]">
+          Complete os endereços para exibir os dois pontos.
+        </p>
+      )}
+      <div className="mt-2 flex items-center justify-between gap-3 text-[10px]">
+        <MapStatus color="blue" found={!!pickup} label="Coleta" />
+        <MapStatus color="orange" found={!!delivery} label="Entrega" />
+      </div>
+    </div>
+  );
 }
 
 function MapStatus({ color, found, label }: { color: 'blue' | 'orange'; found: boolean; label: string }) {
-  return <div className="map-status"><i className={color} /> <span className={found ? 'located' : 'map-warning'}>{found ? `${label} localizada` : `${label} aguardando endereço`}</span></div>;
+  return (
+    <div className="flex min-w-0 items-center gap-1.5">
+      <i
+        className={`h-2 w-2 shrink-0 rounded-full ${
+          color === 'blue' ? 'bg-[#39b5ee]' : 'bg-[#ff7a18]'
+        }`}
+      />
+      <span className={`truncate ${found ? 'text-[#18864e]' : 'text-[#9b641c]'}`}>
+        {found ? `${label} localizada` : `${label} aguardando endereço`}
+      </span>
+    </div>
+  );
 }

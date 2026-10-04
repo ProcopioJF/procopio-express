@@ -27,6 +27,33 @@ export function isDatabaseConfigured(databaseUrl: string) {
   }
 }
 
+export function getWhatsAppIntegrationReadiness(settings: {
+  accessToken?: string
+  phoneNumberId?: string
+  operationsNumber?: string
+  verifyToken?: string
+  appSecret?: string
+}) {
+  const requiredSettings = [
+    ["accessToken", "WHATSAPP_ACCESS_TOKEN"],
+    ["phoneNumberId", "WHATSAPP_PHONE_NUMBER_ID"],
+    ["operationsNumber", "WHATSAPP_OPERATIONS_NUMBER"],
+    ["verifyToken", "WHATSAPP_VERIFY_TOKEN"],
+    ["appSecret", "WHATSAPP_APP_SECRET"],
+  ] as const
+
+  const missing = requiredSettings
+    .filter(([key]) => !settings[key]?.trim())
+    .map(([, variable]) => variable)
+
+  return {
+    status: missing.length === 0 ? "ACTIVE" as const : "SETUP_REQUIRED" as const,
+    note: missing.length === 0
+      ? "Credenciais, número operacional e requisitos do webhook configurados."
+      : `Configuração incompleta no backend. Variáveis pendentes: ${missing.join(", ")}.`,
+  }
+}
+
 export const databaseConfigured = isDatabaseConfigured(config.databaseUrl);
 
 if (config.nodeEnv === "production" && !process.env.JWT_SECRET) {
@@ -35,6 +62,6 @@ if (config.nodeEnv === "production" && !process.env.JWT_SECRET) {
 if (config.nodeEnv === "production" && !databaseConfigured) {
   throw new Error("DATABASE_URL deve conter uma conexão PostgreSQL válida em produção");
 }
-if (config.nodeEnv === "production" && config.corsOrigins.length === 0) {
+if (config.nodeEnv === "production" && config.corsOrigins.length === 0 && !process.env.VERCEL_URL) {
   throw new Error("CORS_ORIGINS deve conter os domínios autorizados em produção");
 }

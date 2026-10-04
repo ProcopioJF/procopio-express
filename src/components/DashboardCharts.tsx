@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useState } from "react"
 
 import {
   Area,
@@ -7,7 +7,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
   Line,
   LineChart,
   Pie,
@@ -18,35 +17,41 @@ import {
   YAxis,
 } from "recharts"
 
-import type { ApiCompany, ApiOrder } from "../services/api"
+import type { ApiDashboardCharts } from "../services/api"
 
 const COLORS = [
-  "#f47b20",
-  "#0c225a",
-  "#38bdf8",
-  "#8b5cf6",
-  "#10b981",
+  "#ff7a18",
+  "#0f3266",
+  "#39b5ee",
+  "#17447f",
+  "#16a34a",
   "#94a3b8",
 ]
 
 const money = (value: number) =>
   `R$ ${value.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}`
 
+type ChartSelection = "daily" | "monthlyValue" | "distribution" | "monthlyOrders" | "hourly"
+
 function ChartCard({
   title,
   detail,
   children,
+  className,
 }: {
   title: string
   detail?: string
   children: React.ReactNode
+  className?: string
 }) {
   return (
-    <article className="min-w-0 rounded-2xl border border-[#e8edf4] bg-white p-5 shadow-[0_3px_14px_rgba(15,35,65,0.04)]">
-      <div className="mb-4 flex items-start justify-between gap-3">
+    <article
+      className={`min-w-0 rounded-2xl border border-[#e5eaf0] bg-white p-3 sm:p-5 shadow-[0_3px_14px_rgba(15,35,65,0.04)] ${className ?? ""}`}
+    >
+      <div className="mb-3 flex flex-col items-start justify-between gap-1.5 sm:mb-4 sm:flex-row sm:gap-3">
         <h3 className="text-sm font-bold text-[#102b55]">{title}</h3>
         {detail && (
-          <span className="text-[10px] font-medium text-[#94a3b8]">
+          <span className="text-[10px] font-medium leading-tight text-[#718096] sm:text-right">
             {detail}
           </span>
         )}
@@ -57,213 +62,61 @@ function ChartCard({
 }
 
 export default function DashboardCharts({
-  orders,
-
-  companies = [],
-
+  data,
   audience = "company",
 }: {
-  orders: ApiOrder[]
-
-  companies?: ApiCompany[]
-
+  data: ApiDashboardCharts
   audience?: "company" | "admin"
 }) {
-  const data = useMemo(() => {
-    const today = new Date()
-
-    const dayStart = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate(),
-    )
-
-    const recentDays = Array.from({ length: 7 }, (_, index) => {
-      const date = new Date(dayStart)
-
-      date.setDate(dayStart.getDate() - (6 - index))
-
-      return {
-        date,
-
-        label: new Intl.DateTimeFormat("pt-BR", { weekday: "short" })
-          .format(date)
-          .replace(".", ""),
-
-        orders: 0,
-
-        total: 0,
-      }
-    })
-
-    const months = Array.from({ length: 6 }, (_, index) => {
-      const date = new Date(
-        today.getFullYear(),
-        today.getMonth() - (5 - index),
-        1,
-      )
-
-      return {
-        year: date.getFullYear(),
-
-        month: date.getMonth(),
-
-        label: new Intl.DateTimeFormat("pt-BR", { month: "short" })
-          .format(date)
-          .replace(".", ""),
-
-        orders: 0,
-
-        total: 0,
-      }
-    })
-
-    const hours = Array.from({ length: 12 }, (_, index) => ({
-      hour: index + 8,
-      label: `${index + 8}h`,
-      orders: 0,
-    }))
-
-    const neighborhoods = new Map<string, number>()
-
-    const companyCounts = new Map<string, number>()
-
-    orders.forEach((order) => {
-      const created = new Date(order.createdAt)
-
-      if (Number.isNaN(created.getTime())) return
-
-      const price = Number(order.price) || 0
-
-      const day = recentDays.find(
-        ({ date }) => date.toDateString() === created.toDateString(),
-      )
-
-      if (day) {
-        day.orders += 1
-
-        day.total += price
-      }
-
-      const month = months.find(
-        (item) =>
-          item.year === created.getFullYear() &&
-          item.month === created.getMonth(),
-      )
-
-      if (month) {
-        month.orders += 1
-
-        month.total += price
-      }
-
-      if (
-        created.toDateString() === today.toDateString() &&
-        created.getHours() >= 8 &&
-        created.getHours() <= 19
-      ) {
-        hours[created.getHours() - 8].orders += 1
-      }
-
-      const neighborhood = order.deliveryNeighborhood?.trim() || "Não informado"
-
-      neighborhoods.set(
-        neighborhood,
-        (neighborhoods.get(neighborhood) ?? 0) + 1,
-      )
-
-      if (order.companyId)
-        companyCounts.set(
-          order.companyId,
-          (companyCounts.get(order.companyId) ?? 0) + 1,
-        )
-    })
-
-    const sortedNeighborhoods = [...neighborhoods.entries()].sort(
-      (a, b) => b[1] - a[1],
-    )
-
-    const topNeighborhoods = sortedNeighborhoods
-      .slice(0, 4)
-      .map(([name, value]) => ({ name, value }))
-
-    const otherNeighborhoods = sortedNeighborhoods
-      .slice(4)
-      .reduce((total, [, value]) => total + value, 0)
-
-    if (otherNeighborhoods)
-      topNeighborhoods.push({ name: "Outros", value: otherNeighborhoods })
-
-    const companyNames = new Map(
-      companies.map((company) => [company.id, company.name]),
-    )
-
-    const companyVolume = [...companyCounts.entries()]
-
-      .map(([id, count]) => ({
-        name: companyNames.get(id) ?? "Empresa",
-        orders: count,
-      }))
-
-      .sort((a, b) => b.orders - a.orders)
-
-      .slice(0, 5)
-
-    const previousMonth = months.at(-2)
-
-    const currentMonth = months.at(-1)
-
-    return {
-      recentDays: recentDays.map(({ label, orders: count, total }) => ({
-        name: label,
-        orders: count,
-        total,
-      })),
-
-      months: months.map(({ label, orders: count, total }) => ({
-        name: label,
-        orders: count,
-        total,
-      })),
-
-      hours,
-
-      neighborhoods: topNeighborhoods,
-
-      companyVolume,
-
-      monthlyComparison: months.map(({ label, orders: count }, index) => ({
-        name: label,
-
-        atual: count,
-
-        anterior: index > 0 ? months[index - 1].orders : 0,
-      })),
-
-      peakNeighborhood: sortedNeighborhoods[0]?.[0] ?? "—",
-
-      peakHour: hours.reduce(
-        (peak, hour) => (hour.orders > peak.orders ? hour : peak),
-        hours[0],
-      ),
-
-      previousMonthOrders: previousMonth?.orders ?? 0,
-
-      currentMonthOrders: currentMonth?.orders ?? 0,
-    }
-  }, [companies, orders])
-
+  const [selectedChart, setSelectedChart] = useState<ChartSelection>("daily")
   const chartAxis = {
     fontSize: 10,
-    fill: "#94a3b8",
+    fill: "#64748b",
     tickLine: false,
     axisLine: false,
+  }
+  const tooltipStyle = {
+    contentStyle: {
+      border: "1px solid #e5eaf0",
+      borderRadius: 12,
+      boxShadow: "0 8px 24px rgba(16, 42, 67, 0.12)",
+      fontSize: 12,
+      padding: "8px 12px",
+    },
+    labelStyle: { color: "#102a43", fontWeight: 700, marginBottom: 4 },
+    itemStyle: { color: "#52657f", fontWeight: 500 },
+    cursor: { fill: "rgba(57, 181, 238, 0.08)" },
   }
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-3">
-        <ChartCard title="Entregas por dia" detail="Últimos 7 dias">
+      <label className="block md:hidden">
+        <span className="mb-1.5 block text-xs font-semibold text-[#718096]">
+          Gráfico para exibir
+        </span>
+        <select
+          aria-label="Selecionar gráfico do painel"
+          value={selectedChart}
+          onChange={(event) =>
+            setSelectedChart(event.target.value as ChartSelection)
+          }
+          className="h-11 w-full rounded-xl border border-[#e5eaf0] bg-white px-3 text-sm font-semibold text-[#102a43] outline-none focus:border-[#39b5ee]"
+        >
+          <option value="daily">Entregas por dia</option>
+          <option value="monthlyValue">Valores registrados por mês</option>
+          <option value="distribution">
+            {audience === "admin" ? "Volume por empresa" : "Volume por bairro"}
+          </option>
+          <option value="monthlyOrders">Pedidos por mês</option>
+          <option value="hourly">Volume por horário</option>
+        </select>
+      </label>
+      <div className="grid gap-4 md:grid-cols-2">
+        <ChartCard
+          title="Entregas por dia"
+          detail="Últimos 7 dias"
+          className={selectedChart === "daily" ? "" : "hidden md:block"}
+        >
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart
               data={data.recentDays}
@@ -271,19 +124,19 @@ export default function DashboardCharts({
             >
               <defs>
                 <linearGradient id="deliveryFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#f47b20" stopOpacity={0.22} />
-                  <stop offset="95%" stopColor="#f47b20" stopOpacity={0} />
+                  <stop offset="0%" stopColor="#ff7a18" stopOpacity={0.22} />
+                  <stop offset="95%" stopColor="#ff7a18" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke="#eef2f7" vertical={false} />
+              <CartesianGrid stroke="#e9eff5" vertical={false} />
               <XAxis dataKey="name" tick={chartAxis} />
               <YAxis allowDecimals={false} tick={chartAxis} />
-              <Tooltip />
+              <Tooltip {...tooltipStyle} />
               <Area
                 type="monotone"
                 dataKey="orders"
                 name="Entregas"
-                stroke="#f47b20"
+                stroke="#ff7a18"
                 strokeWidth={2.5}
                 fill="url(#deliveryFill)"
               />
@@ -291,20 +144,27 @@ export default function DashboardCharts({
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Gastos por período" detail="Até 100 pedidos recentes">
+        <ChartCard
+          title="Valores registrados por mês"
+          detail="Todo o histórico · últimos 6 meses"
+          className={selectedChart === "monthlyValue" ? "" : "hidden md:block"}
+        >
           <ResponsiveContainer width="100%" height={220}>
             <BarChart
               data={data.months}
               margin={{ top: 8, right: 4, left: -12, bottom: 0 }}
             >
-              <CartesianGrid stroke="#eef2f7" vertical={false} />
+              <CartesianGrid stroke="#e9eff5" vertical={false} />
               <XAxis dataKey="name" tick={chartAxis} />
               <YAxis tick={chartAxis} />
-              <Tooltip formatter={(value) => money(Number(value ?? 0))} />
+              <Tooltip
+                {...tooltipStyle}
+                formatter={(value) => money(Number(value ?? 0))}
+              />
               <Bar
                 dataKey="total"
-                name="Gasto"
-                fill="#f47b20"
+                name="Valor registrado"
+                fill="#ff7a18"
                 radius={[5, 5, 0, 0]}
               />
             </BarChart>
@@ -315,7 +175,8 @@ export default function DashboardCharts({
           title={
             audience === "admin" ? "Volume por empresa" : "Volume por bairro"
           }
-          detail="Registros recentes"
+          detail="Todo o histórico"
+          className={selectedChart === "distribution" ? "" : "hidden md:block"}
         >
           {audience === "admin" && data.companyVolume.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>
@@ -324,7 +185,7 @@ export default function DashboardCharts({
                 layout="vertical"
                 margin={{ top: 0, right: 10, left: 12, bottom: 0 }}
               >
-                <CartesianGrid stroke="#eef2f7" horizontal={false} />
+                <CartesianGrid stroke="#e9eff5" horizontal={false} />
                 <XAxis type="number" tick={chartAxis} />
                 <YAxis
                   type="category"
@@ -332,11 +193,11 @@ export default function DashboardCharts({
                   width={90}
                   tick={{ ...chartAxis, fontSize: 9 }}
                 />
-                <Tooltip />
+                <Tooltip {...tooltipStyle} />
                 <Bar
                   dataKey="orders"
                   name="Entregas"
-                  fill="#0c225a"
+                  fill="#0f3266"
                   radius={[0, 5, 5, 0]}
                 />
               </BarChart>
@@ -349,8 +210,8 @@ export default function DashboardCharts({
                     data={data.neighborhoods}
                     dataKey="value"
                     nameKey="name"
-                    innerRadius={54}
-                    outerRadius={82}
+                    innerRadius={46}
+                    outerRadius={70}
                     paddingAngle={3}
                   >
                     {data.neighborhoods.map((item, index) => (
@@ -360,7 +221,7 @@ export default function DashboardCharts({
                       />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip {...tooltipStyle} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="min-w-0 space-y-2">
@@ -382,70 +243,63 @@ export default function DashboardCharts({
             <EmptyChart />
           )}
         </ChartCard>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <ChartCard title="Volume por horário" detail="Pedidos registrados hoje">
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart
-              data={data.hours}
-              margin={{ top: 8, right: 4, left: -24, bottom: 0 }}
-            >
-              <CartesianGrid stroke="#eef2f7" vertical={false} />
-              <XAxis dataKey="label" tick={chartAxis} interval={2} />
-              <YAxis allowDecimals={false} tick={chartAxis} />
-              <Tooltip />
-              <Bar
-                dataKey="orders"
-                name="Entregas"
-                fill="#38bdf8"
-                radius={[4, 4, 0, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
 
         <ChartCard
-          title="Comparação mensal"
-          detail="Pedidos carregados · janela de 6 meses"
+          title="Pedidos por mês"
+          detail="Todo o histórico · últimos 6 meses"
+          className={selectedChart === "monthlyOrders" ? "" : "hidden md:block"}
         >
           <ResponsiveContainer width="100%" height={220}>
             <LineChart
-              data={data.monthlyComparison}
+              data={data.months}
               margin={{ top: 8, right: 8, left: -24, bottom: 0 }}
             >
-              <CartesianGrid stroke="#eef2f7" vertical={false} />
+              <CartesianGrid stroke="#e9eff5" vertical={false} />
               <XAxis dataKey="name" tick={chartAxis} />
               <YAxis allowDecimals={false} tick={chartAxis} />
-              <Tooltip />
-              <Legend wrapperStyle={{ fontSize: 10 }} />
+              <Tooltip {...tooltipStyle} />
               <Line
                 type="monotone"
-                dataKey="atual"
-                name="Mês atual"
-                stroke="#0c225a"
+                dataKey="orders"
+                name="Pedidos"
+                stroke="#0f3266"
                 strokeWidth={2}
                 dot={{ r: 3 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="anterior"
-                name="Mês anterior"
-                stroke="#f47b20"
-                strokeWidth={2}
-                strokeDasharray="4 4"
-                dot={false}
               />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
       </div>
 
+      <ChartCard
+        title="Volume por horário"
+        detail="Pedidos registrados hoje"
+        className={selectedChart === "hourly" ? "" : "hidden md:block"}
+      >
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart
+            data={data.hours}
+            margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
+          >
+            <CartesianGrid stroke="#e9eff5" vertical={false} />
+            <XAxis dataKey="label" tick={chartAxis} interval={0} />
+            <YAxis allowDecimals={false} tick={chartAxis} />
+            <Tooltip {...tooltipStyle} />
+            <Bar
+              dataKey="orders"
+              name="Entregas"
+              fill="#39b5ee"
+              radius={[4, 4, 0, 0]}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Insight
           label="Bairro mais atendido"
           value={data.peakNeighborhood}
-          detail="Nos registros recentes"
+          detail="Todo o histórico"
         />
         <Insight
           label="Horário de pico"
@@ -455,7 +309,7 @@ export default function DashboardCharts({
         <Insight
           label="Entregas neste mês"
           value={`${data.currentMonthOrders}`}
-          detail="Nos últimos registros carregados"
+          detail="Mês atual · todo o histórico"
         />
         <Insight
           label="Comparativo mensal"
@@ -464,7 +318,7 @@ export default function DashboardCharts({
               ? `${Math.round((data.currentMonthOrders / data.previousMonthOrders - 1) * 100)}%`
               : "—"
           }
-          detail="Variação vs. mês anterior"
+          detail="Pedidos no mês anterior"
         />
       </div>
     </div>
@@ -489,14 +343,14 @@ function Insight({
   detail: string
 }) {
   return (
-    <article className="rounded-2xl border border-[#e8edf4] bg-white p-4 shadow-[0_3px_14px_rgba(15,35,65,0.04)]">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#94a3b8]">
+    <article className="rounded-2xl border border-[#e5eaf0] bg-white p-3 sm:p-4 shadow-[0_3px_14px_rgba(15,35,65,0.04)]">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#64748b]">
         {label}
       </p>
-      <strong className="mt-2 block truncate text-base font-extrabold text-[#102b55]">
+      <strong className="mt-2 block truncate text-base font-extrabold text-[#0f3266]">
         {value}
       </strong>
-      <span className="mt-1 block text-[10px] text-[#94a3b8]">{detail}</span>
+      <span className="mt-1 block text-[10px] leading-snug text-[#718096]">{detail}</span>
     </article>
   )
 }

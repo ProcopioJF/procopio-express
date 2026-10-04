@@ -1,20 +1,14 @@
 import { lazy, Suspense } from "react"
 
-import type { ApiCompany, ApiOrder } from "../services/api"
+import type { ApiDashboardCharts } from "../services/api"
 
 const DashboardCharts = lazy(() => import("./DashboardCharts"))
 
 export default function DashboardChartsPanel({
-  orders,
-
-  companies,
-
+  data,
   audience,
 }: {
-  orders: ApiOrder[]
-
-  companies?: ApiCompany[]
-
+  data: ApiDashboardCharts
   audience?: "company" | "admin"
 }) {
   return (
@@ -31,8 +25,7 @@ export default function DashboardChartsPanel({
       }
     >
       <DashboardCharts
-        orders={orders}
-        companies={companies}
+        data={data}
         audience={audience}
       />
     </Suspense>
