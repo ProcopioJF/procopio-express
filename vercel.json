@@ -11,10 +11,6 @@
     {
       "source": "/webhooks/whatsapp",
       "destination": "/api/webhooks/whatsapp"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
     }
   ]
 }
