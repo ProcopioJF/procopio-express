@@ -288,6 +288,7 @@ export default function AdminBusinessPanel({
     email: "",
     phone: "",
     password: "",
+    role: "ADMIN" as ApiSystemUser["role"],
   })
 
   const refresh = useCallback(async () => {
@@ -596,10 +597,21 @@ export default function AdminBusinessPanel({
   const submitUser = (event: FormEvent) => {
     event.preventDefault()
 
+    const role = userForm.role
     void runSave(
       () => createAdminSystemUser(token, userForm),
-      "Administrador criado.",
-    )
+      `${role === "COURIER" ? "Motoboy" : "Administrador"} criado.`,
+    ).then((created) => {
+      if (created) {
+        setUserForm({
+          name: "",
+          email: "",
+          phone: "",
+          password: "",
+          role: "ADMIN",
+        })
+      }
+    })
   }
 
   const chartMonths = useMemo(() => {
@@ -727,8 +739,8 @@ export default function AdminBusinessPanel({
           )}
           {mode === "users" && (
             <PageTitle
-              title="Administradores do sistema"
-              description="Contas administrativas reais; senhas nunca são retornadas pela API."
+              title="Usuários do sistema"
+              description="Contas de administradores e motoboys; senhas nunca são retornadas pela API."
             />
           )}
           {mode === "audit" && (
@@ -1669,20 +1681,36 @@ export default function AdminBusinessPanel({
                   setUserForm({ ...userForm, password: event.target.value })
                 }
               />
+              <label className="block text-xs font-semibold text-[#64748b]">
+                Perfil
+                <select
+                  value={userForm.role}
+                  onChange={(event) =>
+                    setUserForm({
+                      ...userForm,
+                      role: event.target.value as ApiSystemUser["role"],
+                    })
+                  }
+                  className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-sm font-normal text-[#102b55]"
+                >
+                  <option value="ADMIN">Administrador</option>
+                  <option value="COURIER">Motoboy</option>
+                </select>
+              </label>
               <p className="text-xs text-[#718096]">
-                Compartilhe a senha inicial por canal seguro. O administrador
-                criado poderá alterá-la nas configurações de acesso.
+                A senha inicial será usada para entrar no painel. Compartilhe-a
+                com a pessoa por um canal seguro.
               </p>
               <div className="flex items-end">
                 <button className={actionClass} disabled={saving}>
-                  Criar administrador
+                  Criar {userForm.role === "COURIER" ? "motoboy" : "administrador"}
                 </button>
               </div>
             </form>
           )}
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
-              label="Buscar administrador"
+              label="Buscar usuário"
               placeholder="Nome ou e-mail"
               value={userSearch}
               onChange={(event) => setUserSearch(event.target.value)}
@@ -1705,13 +1733,13 @@ export default function AdminBusinessPanel({
             </label>
           </div>
           <p className="text-xs text-[#718096]" aria-live="polite">
-            Exibindo {filteredUsers.length} de {users.length} administradores
+            Exibindo {filteredUsers.length} de {users.length} usuários
           </p>
           <div className="overflow-x-auto rounded-2xl border border-[#e8edf4] bg-white">
             <table className="w-full min-w-[600px] text-left text-xs">
               <thead className="bg-[#f8fafc] text-[10px] uppercase text-[#7b8ba1]">
                 <tr>
-                  {["Nome", "E-mail", "Criado em", "Status"].map((header) => (
+                  {["Nome", "Perfil", "E-mail", "Criado em", "Status"].map((header) => (
                     <th key={header} className="px-4 py-3">
                       {header}
                     </th>
@@ -1723,6 +1751,9 @@ export default function AdminBusinessPanel({
                   <tr key={user.id} className="border-t border-[#f1f4f8]">
                     <td className="px-4 py-3 font-bold text-[#102b55]">
                       {user.name}
+                    </td>
+                    <td className="px-4 py-3">
+                      {user.role === "COURIER" ? "Motoboy" : "Administrador"}
                     </td>
                     <td className="px-4 py-3">{user.email}</td>
                     <td className="px-4 py-3">{date(user.createdAt)}</td>
@@ -1736,7 +1767,7 @@ export default function AdminBusinessPanel({
                                 user.id,
                                 !user.isActive,
                               ),
-                            "Acesso do administrador atualizado.",
+                            `Acesso do ${user.role === "COURIER" ? "motoboy" : "administrador"} atualizado.`,
                           )
                         }
                         className={`rounded-full px-2.5 py-1 font-bold ${
@@ -1756,12 +1787,12 @@ export default function AdminBusinessPanel({
             </table>
             {users.length === 0 && (
               <p className="p-8 text-center text-sm text-[#718096]">
-                Nenhum administrador cadastrado.
+                Nenhum usuário cadastrado.
               </p>
             )}
             {users.length > 0 && filteredUsers.length === 0 && (
               <p className="p-8 text-center text-sm text-[#718096]">
-                Nenhum administrador corresponde aos filtros selecionados.
+                Nenhum usuário corresponde aos filtros selecionados.
               </p>
             )}
           </div>

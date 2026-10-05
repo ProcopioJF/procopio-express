@@ -267,11 +267,25 @@ adminRouter.get("/audit-logs", route(async (_req, res) => {
 
 adminRouter.get("/system-users", route(async (_req, res) => {
   const users = await prisma.user.findMany({
-    where: { role: { name: "ADMIN" } },
+    where: { role: { name: { in: ["ADMIN", "COURIER"] } } },
     orderBy: [{ isActive: "desc" }, { name: "asc" }],
-    select: { id: true, name: true, email: true, isActive: true, createdAt: true },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      isActive: true,
+      createdAt: true,
+      role: { select: { name: true } },
+      courier: { select: { active: true } },
+    },
   });
-  res.json({ users });
+  res.json({
+    users: users.map(({ role, courier, ...user }) => ({
+      ...user,
+      role: role.name,
+      isActive: user.isActive && (role.name !== "COURIER" || courier?.active === true),
+    })),
+  });
 }));
 
 adminRouter.post("/system-users", route(async (req, res) => {
@@ -280,42 +294,80 @@ adminRouter.post("/system-users", route(async (req, res) => {
   if (await prisma.user.findUnique({ where: { email }, select: { id: true } })) {
     throw new HttpError(409, "Já existe uma conta com este e-mail");
   }
-  const role = await prisma.role.findUnique({ where: { name: "ADMIN" } });
-  if (!role) throw new HttpError(500, "Perfil de administrador não está configurado");
-  const user = await prisma.user.create({
-    data: {
-      name: data.name,
-      email,
-      phone: data.phone,
-      passwordHash: await hashPassword(data.password),
-      roleId: role.id,
-      isActive: true,
-    },
-    select: { id: true, name: true, email: true, isActive: true, createdAt: true },
+  const role = await prisma.role.findUnique({ where: { name: data.role } });
+  if (!role) throw new HttpError(500, "Perfil de usuário não está configurado");
+  const user = await prisma.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: {
+        name: data.name,
+        email,
+        phone: data.phone,
+        passwordHash: await hashPassword(data.password),
+        roleId: role.id,
+        isActive: true,
+      },
+    });
+    if (data.role === "COURIER") {
+      await tx.courier.create({ data: { userId: created.id, active: true } });
+    }
+    return tx.user.findUniqueOrThrow({
+      where: { id: created.id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        isActive: true,
+        createdAt: true,
+        role: { select: { name: true } },
+        courier: { select: { active: true } },
+      },
+    });
   });
-  await audit(req, "CREATE", "User", user.id, { email: user.email });
-  res.status(201).json({ user });
+  const { role: userRole, courier, ...userData } = user;
+  const result = {
+    ...userData,
+    role: userRole.name,
+    isActive: userData.isActive && (userRole.name !== "COURIER" || courier?.active === true),
+  };
+  await audit(req, "CREATE", "User", result.id, { email: result.email, role: result.role });
+  res.status(201).json({ user: result });
 }));
 
 adminRouter.patch("/system-users/:id", route(async (req, res) => {
   const data = systemUserActiveSchema.parse(req.body);
   const id = String(req.params.id);
   const user = await prisma.$transaction(async (tx) => {
-    const target = await tx.user.findFirst({ where: { id, role: { name: "ADMIN" } }, select: { id: true } });
-    if (!target) throw new HttpError(404, "Administrador não encontrado");
-    if (req.actor?.id === id && !data.isActive) throw new HttpError(400, "Não é possível desativar seu próprio usuário");
-    if (!data.isActive) {
-      const activeAdmins = await tx.user.count({ where: { role: { name: "ADMIN" }, isActive: true } });
-      if (activeAdmins <= 1) throw new HttpError(409, "O sistema precisa manter ao menos um administrador ativo");
+    const target = await tx.user.findFirst({
+      where: { id, role: { name: { in: ["ADMIN", "COURIER"] } } },
+      select: { id: true, role: { select: { name: true } } },
+    });
+    if (!target) throw new HttpError(404, "Usuário do sistema não encontrado");
+    if (target.role.name === "ADMIN") {
+      if (req.actor?.id === id && !data.isActive) throw new HttpError(400, "Não é possível desativar seu próprio usuário");
+      if (!data.isActive) {
+        const activeAdmins = await tx.user.count({ where: { role: { name: "ADMIN" }, isActive: true } });
+        if (activeAdmins <= 1) throw new HttpError(409, "O sistema precisa manter ao menos um administrador ativo");
+      }
+    }
+    if (target.role.name === "COURIER") {
+      const courier = await tx.courier.findUnique({ where: { userId: id }, select: { id: true } });
+      if (!courier) throw new HttpError(409, "O perfil do motoboy não está configurado");
+      await tx.courier.update({ where: { id: courier.id }, data: { active: data.isActive } });
     }
     return tx.user.update({
       where: { id },
       data: { isActive: data.isActive },
-      select: { id: true, name: true, email: true, isActive: true, createdAt: true },
+      select: { id: true, name: true, email: true, isActive: true, createdAt: true, role: { select: { name: true } }, courier: { select: { active: true } } },
     });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  await audit(req, "UPDATE", "User", user.id, { isActive: user.isActive });
-  res.json({ user });
+  const { role, courier, ...userData } = user;
+  const result = {
+    ...userData,
+    role: role.name,
+    isActive: userData.isActive && (role.name !== "COURIER" || courier?.active === true),
+  };
+  await audit(req, "UPDATE", "User", result.id, { isActive: result.isActive, role: result.role });
+  res.json({ user: result });
 }));
 
 adminRouter.get("/integrations", route(async (_req, res) => {

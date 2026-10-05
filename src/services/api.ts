@@ -385,6 +385,7 @@ export type ApiSystemUser = {
   id: string
   name: string
   email: string
+  role: "ADMIN" | "COURIER"
   isActive: boolean
   createdAt: string
 }
@@ -1216,7 +1217,7 @@ export async function getAdminSystemUsers(token: string) {
 
 export async function createAdminSystemUser(
   token: string,
-  user: { name: string; email: string; phone?: string; password: string },
+  user: { name: string; email: string; phone?: string; password: string; role: ApiSystemUser["role"] },
 ) {
   return authorizedRequest<{ user: ApiSystemUser }>(
     "/admin/system-users",

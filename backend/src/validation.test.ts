@@ -12,7 +12,31 @@ import {
   orderListQuerySchema,
   planSchema,
   subscriptionSchema,
+  systemUserSchema,
 } from "./validation.js"
+
+describe("system user profile validation", () => {
+  const user = {
+    name: "João Entregador",
+    email: "joao@example.com",
+    password: "senha-segura-com-12",
+  }
+
+  it("defaults newly created system users to administrators for compatibility", () => {
+    assert.equal(systemUserSchema.parse(user).role, "ADMIN")
+  })
+
+  it("accepts courier profiles and rejects unsupported profiles", () => {
+    assert.equal(
+      systemUserSchema.parse({ ...user, role: "COURIER" }).role,
+      "COURIER",
+    )
+    assert.equal(
+      systemUserSchema.safeParse({ ...user, role: "COMPANY" }).success,
+      false,
+    )
+  })
+})
 
 describe("delivery address CEP validation", () => {
   const address = {

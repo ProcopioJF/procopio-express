@@ -186,6 +186,8 @@ export const systemUserSchema = z.object({
   phone: nullableText(30),
 
   password: z.string().min(12).max(100),
+
+  role: z.enum(["ADMIN", "COURIER"]).default("ADMIN"),
 })
 
 export const systemUserActiveSchema = z.object({ isActive: z.boolean() })
