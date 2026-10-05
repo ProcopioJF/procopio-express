@@ -600,7 +600,7 @@ export default function AdminBusinessPanel({
     const role = userForm.role
     void runSave(
       () => createAdminSystemUser(token, userForm),
-      `${role === "COURIER" ? "Motoboy" : "Administrador"} criado.`,
+      `${role === "COURIER" ? "Motoboy" : role === "COMPANY" ? "Conta empresarial" : "Administrador"} criado.`,
     ).then((created) => {
       if (created) {
         setUserForm({
@@ -740,7 +740,7 @@ export default function AdminBusinessPanel({
           {mode === "users" && (
             <PageTitle
               title="Usuários do sistema"
-              description="Contas de administradores e motoboys; senhas nunca são retornadas pela API."
+              description="Contas de administradores, motoboys e empresas; senhas nunca são retornadas pela API."
             />
           )}
           {mode === "audit" && (
@@ -1695,15 +1695,22 @@ export default function AdminBusinessPanel({
                 >
                   <option value="ADMIN">Administrador</option>
                   <option value="COURIER">Motoboy</option>
+                  <option value="COMPANY">Empresa</option>
                 </select>
               </label>
               <p className="text-xs text-[#718096]">
-                A senha inicial será usada para entrar no painel. Compartilhe-a
-                com a pessoa por um canal seguro.
+                {userForm.role === "COMPANY"
+                  ? "A empresa poderá alterar a senha depois, em Segurança da conta no painel empresarial."
+                  : "A senha inicial será usada para entrar no painel. Compartilhe-a com a pessoa por um canal seguro."}
               </p>
               <div className="flex items-end">
                 <button className={actionClass} disabled={saving}>
-                  Criar {userForm.role === "COURIER" ? "motoboy" : "administrador"}
+                  Criar{" "}
+                  {userForm.role === "COURIER"
+                    ? "motoboy"
+                    : userForm.role === "COMPANY"
+                      ? "conta empresarial"
+                      : "administrador"}
                 </button>
               </div>
             </form>
@@ -1753,7 +1760,11 @@ export default function AdminBusinessPanel({
                       {user.name}
                     </td>
                     <td className="px-4 py-3">
-                      {user.role === "COURIER" ? "Motoboy" : "Administrador"}
+                      {user.role === "COURIER"
+                        ? "Motoboy"
+                        : user.role === "COMPANY"
+                          ? "Empresa"
+                          : "Administrador"}
                     </td>
                     <td className="px-4 py-3">{user.email}</td>
                     <td className="px-4 py-3">{date(user.createdAt)}</td>
@@ -1767,7 +1778,7 @@ export default function AdminBusinessPanel({
                                 user.id,
                                 !user.isActive,
                               ),
-                            `Acesso do ${user.role === "COURIER" ? "motoboy" : "administrador"} atualizado.`,
+                            `Acesso da conta atualizado.`,
                           )
                         }
                         className={`rounded-full px-2.5 py-1 font-bold ${

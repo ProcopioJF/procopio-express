@@ -267,7 +267,7 @@ adminRouter.get("/audit-logs", route(async (_req, res) => {
 
 adminRouter.get("/system-users", route(async (_req, res) => {
   const users = await prisma.user.findMany({
-    where: { role: { name: { in: ["ADMIN", "COURIER"] } } },
+    where: { role: { name: { in: ["ADMIN", "COURIER", "COMPANY"] } } },
     orderBy: [{ isActive: "desc" }, { name: "asc" }],
     select: {
       id: true,
@@ -297,6 +297,16 @@ adminRouter.post("/system-users", route(async (req, res) => {
   const role = await prisma.role.findUnique({ where: { name: data.role } });
   if (!role) throw new HttpError(500, "Perfil de usuário não está configurado");
   const user = await prisma.$transaction(async (tx) => {
+    const company = data.role === "COMPANY"
+      ? await tx.company.create({
+          data: {
+            name: data.name,
+            email,
+            phone: data.phone ?? null,
+          },
+          select: { id: true },
+        })
+      : null;
     const created = await tx.user.create({
       data: {
         name: data.name,
@@ -304,6 +314,9 @@ adminRouter.post("/system-users", route(async (req, res) => {
         phone: data.phone,
         passwordHash: await hashPassword(data.password),
         roleId: role.id,
+        ...(company
+          ? { companyId: company.id, companyPermission: "ADMIN" as const }
+          : {}),
         isActive: true,
       },
     });
@@ -338,7 +351,7 @@ adminRouter.patch("/system-users/:id", route(async (req, res) => {
   const id = String(req.params.id);
   const user = await prisma.$transaction(async (tx) => {
     const target = await tx.user.findFirst({
-      where: { id, role: { name: { in: ["ADMIN", "COURIER"] } } },
+      where: { id, role: { name: { in: ["ADMIN", "COURIER", "COMPANY"] } } },
       select: { id: true, role: { select: { name: true } } },
     });
     if (!target) throw new HttpError(404, "Usuário do sistema não encontrado");

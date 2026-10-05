@@ -385,7 +385,7 @@ export type ApiSystemUser = {
   id: string
   name: string
   email: string
-  role: "ADMIN" | "COURIER"
+  role: "ADMIN" | "COURIER" | "COMPANY"
   isActive: boolean
   createdAt: string
 }

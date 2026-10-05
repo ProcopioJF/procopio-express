@@ -134,12 +134,14 @@ export default function CompanyOrganizationPanel({
       setShowForm(false)
 
       onFeedback("", success)
+      return true
     } catch (cause) {
       onFeedback(
         cause instanceof Error
           ? cause.message
           : "Não foi possível salvar as alterações.",
       )
+      return false
     } finally {
       setSaving(false)
     }
@@ -191,13 +193,15 @@ export default function CompanyOrganizationPanel({
         ),
 
       "Senha atualizada.",
-    ).then(() =>
-      setPasswordForm({
-        currentPassword: "",
-        newPassword: "",
-        confirmPassword: "",
-      }),
-    )
+    ).then((saved) => {
+      if (saved) {
+        setPasswordForm({
+          currentPassword: "",
+          newPassword: "",
+          confirmPassword: "",
+        })
+      }
+    })
   }
 
   const tabs: Array<[Tab, string]> = [

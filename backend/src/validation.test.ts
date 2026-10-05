@@ -5,6 +5,7 @@ import { describe, it } from "node:test"
 import {
   addressSchema,
   adminOrderStatusSchema,
+  changePasswordSchema,
   courierOrderStatusSchema,
   financialEntryListQuerySchema,
   financialEntrySchema,
@@ -26,13 +27,42 @@ describe("system user profile validation", () => {
     assert.equal(systemUserSchema.parse(user).role, "ADMIN")
   })
 
-  it("accepts courier profiles and rejects unsupported profiles", () => {
+  it("accepts courier and company profiles and rejects unsupported profiles", () => {
     assert.equal(
       systemUserSchema.parse({ ...user, role: "COURIER" }).role,
       "COURIER",
     )
     assert.equal(
-      systemUserSchema.safeParse({ ...user, role: "COMPANY" }).success,
+      systemUserSchema.parse({ ...user, role: "COMPANY" }).role,
+      "COMPANY",
+    )
+    assert.equal(
+      systemUserSchema.safeParse({ ...user, role: "UNSUPPORTED" }).success,
+      false,
+    )
+  })
+})
+
+describe("company password change validation", () => {
+  it("requires the current password and a new password of at least 12 characters", () => {
+    assert.equal(
+      changePasswordSchema.safeParse({
+        currentPassword: "senha atual",
+        newPassword: "senha-com-12",
+      }).success,
+      true,
+    )
+    assert.equal(
+      changePasswordSchema.safeParse({
+        currentPassword: "senha atual",
+        newPassword: "curta",
+      }).success,
+      false,
+    )
+    assert.equal(
+      changePasswordSchema.safeParse({
+        newPassword: "senha-com-12",
+      }).success,
       false,
     )
   })

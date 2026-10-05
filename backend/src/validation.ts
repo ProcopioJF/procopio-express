@@ -60,7 +60,7 @@ export const changePasswordSchema = z.object({
 
   newPassword: z
     .string()
-    .min(8, "A nova senha deve ter pelo menos 8 caracteres")
+    .min(12, "A nova senha deve ter pelo menos 12 caracteres")
     .max(100),
 })
 
@@ -187,7 +187,7 @@ export const systemUserSchema = z.object({
 
   password: z.string().min(12).max(100),
 
-  role: z.enum(["ADMIN", "COURIER"]).default("ADMIN"),
+  role: z.enum(["ADMIN", "COURIER", "COMPANY"]).default("ADMIN"),
 })
 
 export const systemUserActiveSchema = z.object({ isActive: z.boolean() })
