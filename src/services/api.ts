@@ -1246,6 +1246,21 @@ export async function updateAdminSystemUser(
   )
 }
 
+export async function resetAdminSystemUserPassword(
+  token: string,
+  id: string,
+  password: string,
+) {
+  return authorizedRequest<{ ok: boolean }>(
+    `/admin/system-users/${encodeURIComponent(id)}/reset-password`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    },
+  )
+}
+
 export async function getAdminIntegrations(token: string) {
   return authorizedRequest<{ integrations: ApiIntegration[] }>(
     "/admin/integrations",

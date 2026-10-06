@@ -64,7 +64,7 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
                 <div className="flex flex-col gap-5 animate-fade-in-up">
                   <div>
                     <h2 className="text-lg font-700 text-[#0f3266] mb-1">Recuperação de acesso</h2>
-                    <p className="text-xs text-[#64748b]">A recuperação automática por e-mail ainda não está configurada. Peça ao administrador da Procópio Express para redefinir sua senha.</p>
+                    <p className="text-xs text-[#64748b]">Peça ao administrador da Procópio Express para gerar uma senha temporária e compartilhá-la por um canal seguro. Se sua conta for empresarial, altere a senha depois em Segurança da conta no painel.</p>
                   </div>
                   <button onClick={() => setForgotMode(false)} className="min-h-12 rounded-xl bg-[#ff7a18] text-sm font-700 text-white shadow-sm shadow-orange-200 hover:bg-[#e7650b]">
                     ← Voltar ao login

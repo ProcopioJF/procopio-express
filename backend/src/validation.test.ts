@@ -13,6 +13,7 @@ import {
   orderListQuerySchema,
   planSchema,
   subscriptionSchema,
+  systemUserPasswordResetSchema,
   systemUserSchema,
 } from "./validation.js"
 
@@ -38,6 +39,26 @@ describe("system user profile validation", () => {
     )
     assert.equal(
       systemUserSchema.safeParse({ ...user, role: "UNSUPPORTED" }).success,
+      false,
+    )
+  })
+})
+
+describe("system user temporary password validation", () => {
+  it("requires a temporary password of at least 12 characters", () => {
+    assert.equal(
+      systemUserPasswordResetSchema.safeParse({
+        password: "senha-temporaria-segura",
+      }).success,
+      true,
+    )
+    assert.equal(
+      systemUserPasswordResetSchema.safeParse({ password: "curta" }).success,
+      false,
+    )
+    assert.equal(
+      systemUserPasswordResetSchema.safeParse({ password: "x".repeat(101) })
+        .success,
       false,
     )
   })

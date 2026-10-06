@@ -16,6 +16,7 @@ import {
   subscriptionSchema,
   subscriptionUpdateSchema,
   systemUserActiveSchema,
+  systemUserPasswordResetSchema,
   systemUserSchema,
 } from "../validation.js";
 import { hashPassword } from "../auth.js";
@@ -344,6 +345,38 @@ adminRouter.post("/system-users", route(async (req, res) => {
   };
   await audit(req, "CREATE", "User", result.id, { email: result.email, role: result.role });
   res.status(201).json({ user: result });
+}));
+
+adminRouter.post("/system-users/:id/reset-password", route(async (req, res) => {
+  const { password } = systemUserPasswordResetSchema.parse(req.body);
+  const id = String(req.params.id);
+  const passwordHash = await hashPassword(password);
+  await prisma.$transaction(async (tx) => {
+    const target = await tx.user.findFirst({
+      where: { id, role: { name: { in: ["ADMIN", "COURIER", "COMPANY"] } } },
+      select: { id: true },
+    });
+    if (!target) throw new HttpError(404, "Usuário do sistema não encontrado");
+    const actor = await tx.user.findUnique({
+      where: { id: req.actor!.id },
+      select: { name: true },
+    });
+    await tx.user.update({
+      where: { id: target.id },
+      data: { passwordHash },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: req.actor!.id,
+        actorName: actor?.name ?? "Usuário removido",
+        action: "UPDATE",
+        entity: "User",
+        entityId: target.id,
+        details: { passwordReset: true },
+      },
+    });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  res.json({ ok: true });
 }));
 
 adminRouter.patch("/system-users/:id", route(async (req, res) => {

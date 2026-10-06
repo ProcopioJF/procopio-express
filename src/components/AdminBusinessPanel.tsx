@@ -1,4 +1,5 @@
 import {
+  Fragment,
   lazy,
   Suspense,
   useCallback,
@@ -10,7 +11,7 @@ import {
 
 import type { InputHTMLAttributes } from "react"
 
-import { Activity, Pencil, Plus, RefreshCw, ShieldCheck } from "lucide-react"
+import { Activity, Copy, KeyRound, Pencil, Plus, RefreshCw, ShieldCheck } from "lucide-react"
 
 import {
   createAdminFinancialEntry,
@@ -24,6 +25,7 @@ import {
   getAdminPlans,
   getAdminSubscriptions,
   getAdminSystemUsers,
+  resetAdminSystemUserPassword,
   saveAdminLead,
   saveAdminPlan,
   updateAdminPlan,
@@ -254,6 +256,15 @@ export default function AdminBusinessPanel({
   const [userStatusFilter, setUserStatusFilter] = useState<
     "ALL" | "ACTIVE" | "INACTIVE"
   >("ALL")
+
+  const [passwordResetUserId, setPasswordResetUserId] = useState<string | null>(
+    null,
+  )
+
+  const [temporaryPassword, setTemporaryPassword] = useState<{
+    userId: string
+    password: string
+  } | null>(null)
 
   const [logs, setLogs] = useState<ApiAuditLog[]>([])
 
@@ -612,6 +623,50 @@ export default function AdminBusinessPanel({
         })
       }
     })
+  }
+
+  const createTemporaryPassword = () => {
+    const alphabet =
+      "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%*-_"
+    const bytes = crypto.getRandomValues(new Uint8Array(24))
+    return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("")
+  }
+
+  const resetUserPassword = async (user: ApiSystemUser) => {
+    const password = createTemporaryPassword()
+    setSaving(true)
+    setError("")
+    setNotice("")
+    setTemporaryPassword(null)
+
+    try {
+      await resetAdminSystemUserPassword(token, user.id, password)
+      setTemporaryPassword({ userId: user.id, password })
+      setPasswordResetUserId(user.id)
+      await refresh()
+      setNotice(
+        `Senha temporária de ${user.name} criada. Compartilhe-a por um canal seguro.`,
+      )
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Não foi possível redefinir a senha.",
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const copyTemporaryPassword = async () => {
+    if (!temporaryPassword) return
+
+    try {
+      await navigator.clipboard.writeText(temporaryPassword.password)
+      setNotice("Senha temporária copiada. Compartilhe-a por canal seguro.")
+    } catch {
+      setError("Não foi possível copiar. Selecione e copie a senha exibida.")
+    }
   }
 
   const chartMonths = useMemo(() => {
@@ -1755,7 +1810,8 @@ export default function AdminBusinessPanel({
               </thead>
               <tbody>
                 {filteredUsers.map((user) => (
-                  <tr key={user.id} className="border-t border-[#f1f4f8]">
+                  <Fragment key={user.id}>
+                  <tr className="border-t border-[#f1f4f8]">
                     <td className="px-4 py-3 font-bold text-[#102b55]">
                       {user.name}
                     </td>
@@ -1769,30 +1825,86 @@ export default function AdminBusinessPanel({
                     <td className="px-4 py-3">{user.email}</td>
                     <td className="px-4 py-3">{date(user.createdAt)}</td>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() =>
-                          void runSave(
-                            () =>
-                              updateAdminSystemUser(
-                                token,
-                                user.id,
-                                !user.isActive,
-                              ),
-                            `Acesso da conta atualizado.`,
-                          )
-                        }
-                        className={`rounded-full px-2.5 py-1 font-bold ${
-                          user.isActive
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-slate-100 text-slate-600"
-                        }`}
-                      >
-                        {user.isActive
-                          ? "Ativo · desativar"
-                          : "Inativo · ativar"}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() =>
+                            void runSave(
+                              () =>
+                                updateAdminSystemUser(
+                                  token,
+                                  user.id,
+                                  !user.isActive,
+                                ),
+                              "Acesso da conta atualizado.",
+                            )
+                          }
+                          className={`rounded-full px-2.5 py-1 font-bold ${
+                            user.isActive
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {user.isActive
+                            ? "Ativo · desativar"
+                            : "Inativo · ativar"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setError("")
+                            setNotice("")
+                            setTemporaryPassword(null)
+                            setPasswordResetUserId((current) =>
+                              current === user.id ? null : user.id,
+                            )
+                          }}
+                          aria-label={`Redefinir senha de ${user.name}`}
+                          className="rounded-full border border-[#e2e8f0] p-2 text-[#52657f]"
+                        >
+                          <KeyRound size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
+                  {passwordResetUserId === user.id && (
+                    <tr className="border-t border-[#f1f4f8]">
+                      <td colSpan={5} className="px-4 py-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-xs text-[#52657f]">
+                            Gere uma senha temporária para {user.name}. Ela
+                            aparecerá uma vez para compartilhamento seguro.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => void resetUserPassword(user)}
+                            disabled={saving}
+                            className={`${actionClass} shrink-0`}
+                          >
+                            <KeyRound size={14} />
+                            Gerar senha temporária
+                          </button>
+                        </div>
+                        {temporaryPassword?.userId === user.id && (
+                          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                            <Input
+                              label="Senha temporária · copie e compartilhe com segurança"
+                              value={temporaryPassword.password}
+                              readOnly
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void copyTemporaryPassword()}
+                              className={`${actionClass} shrink-0 sm:self-end`}
+                            >
+                              <Copy size={14} />
+                              Copiar senha
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

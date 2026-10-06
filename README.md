@@ -372,8 +372,10 @@ configure um `JWT_SECRET` seguro e restrinja CORS antes do uso real.
 
 ## Funcionalidades ainda dependentes de configuração ou validação
 
-- Recuperação automática de senha por e-mail (a tela informa que deve ser
-  solicitada ao administrador).
+- A redefinição automática por e-mail ainda não está configurada. Um
+  administrador pode gerar uma senha temporária em Usuários do sistema e
+  compartilhá-la por um canal seguro. A senha gerada é mostrada uma vez na tela
+  para cópia; a empresa pode trocá-la após entrar em Segurança da conta.
 - O cálculo PER_KM é opcional e começa desativado; para habilitá-lo, configure
   `PER_KM_PRICING_ENABLED=true`, `ROUTING_API_URL` e valide com coordenadas de
   teste. Sem ativação explícita, a cotação permanece como “Consultar valor”.

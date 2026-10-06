@@ -192,6 +192,10 @@ export const systemUserSchema = z.object({
 
 export const systemUserActiveSchema = z.object({ isActive: z.boolean() })
 
+export const systemUserPasswordResetSchema = z.object({
+  password: z.string().min(12).max(100),
+})
+
 export const priceTableSchema = z.object({
   name: z.string().trim().min(1).max(120),
 
