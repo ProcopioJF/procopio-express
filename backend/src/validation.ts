@@ -182,17 +182,34 @@ export const financialEntrySchema = z.object({
   companyId: z.string().nullable().optional(),
 })
 
-export const systemUserSchema = z.object({
-  name: z.string().trim().min(1).max(120),
+export const systemUserSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
 
-  email: z.string().trim().email().max(254),
+    email: z.string().trim().email().max(254),
 
-  phone: nullableText(30),
+    phone: nullableText(30),
 
-  password: z.string().min(12).max(100),
+    password: z.string().min(1, "Informe sua senha"),
 
-  role: z.enum(["ADMIN", "COURIER", "COMPANY"]).default("ADMIN"),
-})
+    role: z.enum(["ADMIN", "COURIER", "COMPANY"]).default("ADMIN"),
+  })
+  .superRefine((user, context) => {
+    if (user.role !== "COMPANY" && user.password.length < 12) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["password"],
+        message: "A senha deve ter pelo menos 12 caracteres",
+      })
+    }
+    if (user.role !== "COMPANY" && user.password.length > 100) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["password"],
+        message: "A senha deve ter no máximo 100 caracteres",
+      })
+    }
+  })
 
 export const systemUserActiveSchema = z.object({ isActive: z.boolean() })
 
@@ -529,10 +546,7 @@ export const createCompanySchema = z.object({
 
   email: z.string().trim().email("Informe um e-mail válido"),
 
-  password: z
-    .string()
-    .min(8, "A senha deve ter pelo menos 8 caracteres")
-    .max(100),
+  password: z.string().min(1, "Informe sua senha"),
 
   pickupAddress: z.object({
     cep: z

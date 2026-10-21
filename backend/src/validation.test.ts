@@ -8,6 +8,7 @@ import {
   companyBranchPickupAddressSchema,
   companyBranchSchema,
   createOrderSchema,
+  createCompanySchema,
   changePasswordSchema,
   courierOrderStatusSchema,
   financialEntryListQuerySchema,
@@ -94,6 +95,59 @@ describe("system user profile validation", () => {
     )
     assert.equal(
       systemUserSchema.safeParse({ ...user, role: "UNSUPPORTED" }).success,
+      false,
+    )
+  })
+
+  it("allows company passwords of any non-empty length while retaining staff limits", () => {
+    for (const password of ["a", "senha", "x".repeat(101), "x".repeat(200)]) {
+      assert.equal(
+        systemUserSchema.safeParse({ ...user, password, role: "COMPANY" })
+          .success,
+        true,
+      )
+    }
+    assert.equal(
+      systemUserSchema.safeParse({ ...user, password: "", role: "COMPANY" })
+        .success,
+      false,
+    )
+    assert.equal(
+      systemUserSchema.safeParse({ ...user, password: "curta", role: "ADMIN" })
+        .success,
+      false,
+    )
+    assert.equal(
+      systemUserSchema.safeParse({
+        ...user,
+        password: "x".repeat(101),
+        role: "COURIER",
+      }).success,
+      false,
+    )
+  })
+})
+
+describe("partner company account password validation", () => {
+  const company = {
+    name: "Empresa Parceira",
+    phone: "32999999999",
+    email: "parceiro@example.com",
+    pickupAddress: {
+      rua: "Rua Halfeld",
+      numero: "10",
+      bairro: "Centro",
+      cidade: "Juiz de Fora",
+      estado: "MG",
+    },
+  }
+
+  it("accepts any non-empty password length", () => {
+    for (const password of ["x", "senha", "p".repeat(200)]) {
+      assert.equal(createCompanySchema.safeParse({ ...company, password }).success, true)
+    }
+    assert.equal(
+      createCompanySchema.safeParse({ ...company, password: "" }).success,
       false,
     )
   })

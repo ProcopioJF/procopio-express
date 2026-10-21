@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { createHash } from "node:crypto";
 import jwt from "jsonwebtoken";
 import type { RoleName, User } from "@prisma/client";
 import { config } from "./config.js";
@@ -16,11 +17,16 @@ type TokenPayload = {
 };
 
 export async function hashPassword(password: string) {
-  return bcrypt.hash(password, 12);
+  return bcrypt.hash(prehashPassword(password), 12);
 }
 
 export async function verifyPassword(password: string, passwordHash: string) {
+  if (await bcrypt.compare(prehashPassword(password), passwordHash)) return true;
   return bcrypt.compare(password, passwordHash);
+}
+
+function prehashPassword(password: string) {
+  return createHash("sha256").update(password, "utf8").digest("hex");
 }
 
 export function createAccessToken(actor: AuthActor) {

@@ -1727,9 +1727,9 @@ export default function AdminBusinessPanel({
                 }
               />
               <Input
-                label="Senha inicial (mínimo 12 caracteres)"
+                label={userForm.role === "COMPANY" ? "Senha inicial" : "Senha inicial (mínimo 12 caracteres)"}
                 type="password"
-                minLength={12}
+                minLength={userForm.role === "COMPANY" ? undefined : 12}
                 required
                 value={userForm.password}
                 onChange={(event) =>
