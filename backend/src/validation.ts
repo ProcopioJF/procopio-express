@@ -128,6 +128,10 @@ export const adminOrderStatusSchema = z.object({
   status: z.enum(["CONFIRMED", "PICKED_UP", "IN_TRANSIT", "DELIVERED"]),
 })
 
+export const orderCourierAssignmentSchema = z.object({
+  courierId: z.string().trim().min(1).nullable(),
+})
+
 export const planSchema = z.object({
   name: z.string().trim().min(1).max(100),
 
@@ -281,12 +285,24 @@ export const companyMemberUpdateSchema = z
       value.isActive !== undefined || value.companyPermission !== undefined,
   )
 
+export const companyBranchPickupAddressSchema = z.object({
+  rua: z.string().trim().min(1).max(200),
+  numero: z.string().trim().min(1).max(30),
+  bairro: z.string().trim().min(1).max(120),
+  cidade: z.string().trim().min(1).max(120),
+  estado: z.string().trim().length(2).transform((value) => value.toUpperCase()),
+  cep: z.string().trim().regex(/^\d{8}$/).optional(),
+  complemento: z.string().trim().max(200).optional(),
+})
+
 export const companyBranchSchema = z.object({
   name: z.string().trim().min(1).max(120),
 
   phone: nullableText(30),
 
-  address: nullableText(300),
+  address: z
+    .union([nullableText(300), companyBranchPickupAddressSchema])
+    .optional(),
 
   isActive: z.boolean().optional(),
 })
@@ -357,6 +373,7 @@ export const createOrderSchema = z.object({
   customerId: z.string().optional(),
 
   branchId: z.string().optional(),
+  pickupLocationId: z.string().trim().min(1).max(120).optional(),
   costCenterId: z.string().optional(),
 })
 

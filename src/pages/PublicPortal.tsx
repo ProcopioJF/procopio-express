@@ -24,11 +24,12 @@ interface AddressForm {
   neighborhood: string
   complement: string
   city: string
+  state: string
 }
 
 const emptyAddress = (): AddressForm => ({
   name: '', phone: '', cep: '', street: '', number: '',
-  neighborhood: '', complement: '', city: ''
+  neighborhood: '', complement: '', city: '', state: 'MG'
 })
 
 function formatPhone(v: string) {
@@ -192,6 +193,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
   const [organization, setOrganization] = useState<ApiOrganization | null>(null)
   const [organizationError, setOrganizationError] = useState('')
   const [branchId, setBranchId] = useState('')
+  const [pickupLocationId, setPickupLocationId] = useState('')
   const [costCenterId, setCostCenterId] = useState('')
   const [coordinates, setCoordinates] = useState<{ pickup?: { latitude: number; longitude: number }; delivery?: { latitude: number; longitude: number } }>({})
   const [cepLookup, setCepLookup] = useState<{ pickupLoading: boolean; deliveryLoading: boolean; pickupError: string; deliveryError: string }>({
@@ -201,14 +203,46 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
     deliveryError: '',
   })
 
-  const setPickupField = (field: keyof AddressForm) => (v: string) =>
-    setPickup(p => ({ ...p, [field]: v }))
+  const setPickupField = (field: keyof AddressForm) => (v: string) => {
+    const addressField = field !== 'name' && field !== 'phone'
+    const leavingSavedLocation = addressField && Boolean(pickupLocationId)
+    if (addressField) setPickupLocationId('')
+    setPickup(p => ({
+      ...p,
+      [field]: v,
+      ...(leavingSavedLocation ? { state: 'MG' } : {}),
+    }))
+  }
   const setDropoffField = (field: keyof AddressForm) => (v: string) =>
     setDropoff(p => ({ ...p, [field]: v }))
 
+  const savedPickupLocations = organization?.branches.filter(branch => {
+    const address = branch.address
+    return branch.isActive && address?.rua && address.numero && address.bairro && address.cidade && address.estado
+  }) ?? []
+  const choosePickupLocation = (id: string) => {
+    setPickupLocationId(id)
+    if (!id) {
+      setPickup(current => ({ ...current, state: 'MG' }))
+      return
+    }
+    const address = organization?.branches.find(branch => branch.id === id)?.address
+    if (!address?.rua || !address.numero || !address.bairro || !address.cidade || !address.estado) return
+    setPickup(current => ({
+      ...current,
+      cep: address.cep ? formatCep(address.cep) : '',
+      street: address.rua!,
+      number: address.numero!,
+      neighborhood: address.bairro!,
+      complement: address.complemento ?? '',
+      city: address.cidade!,
+      state: address.estado!,
+    }))
+  }
+
   const step1Valid = pickup.name && isValidPhone(pickup.phone) && isValidOptionalCep(pickup.cep) && pickup.street && pickup.number && pickup.neighborhood && pickup.city
   const step2Valid = dropoff.name && isValidPhone(dropoff.phone) && isValidOptionalCep(dropoff.cep) && dropoff.street && dropoff.number && dropoff.neighborhood && dropoff.city
-  const pickupAddress = { cep: pickup.cep.replace(/\D/g, ''), rua: pickup.street, numero: pickup.number, bairro: pickup.neighborhood, complemento: pickup.complement, cidade: pickup.city, estado: 'MG', coordinates: coordinates.pickup }
+  const pickupAddress = { cep: pickup.cep.replace(/\D/g, ''), rua: pickup.street, numero: pickup.number, bairro: pickup.neighborhood, complemento: pickup.complement, cidade: pickup.city, estado: pickup.state, coordinates: coordinates.pickup }
   const deliveryAddress = { cep: dropoff.cep.replace(/\D/g, ''), rua: dropoff.street, numero: dropoff.number, bairro: dropoff.neighborhood, complemento: dropoff.complement, cidade: dropoff.city, estado: 'MG', coordinates: coordinates.delivery }
 
   useEffect(() => {
@@ -222,6 +256,10 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
   }, [])
 
   useEffect(() => {
+    if (pickupLocationId) {
+      setCepLookup(current => ({ ...current, pickupLoading: false, pickupError: '' }))
+      return
+    }
     if (!pickup.cep || !/^\d{8}$/.test(pickup.cep.replace(/\D/g, ''))) {
       setCepLookup(current => ({ ...current, pickupLoading: false, pickupError: '' }))
       return
@@ -248,7 +286,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
         if (active) setCepLookup(current => ({ ...current, pickupLoading: false }))
       })
     return () => { active = false }
-  }, [pickup.cep])
+  }, [pickup.cep, pickupLocationId])
 
   useEffect(() => {
     if (!dropoff.cep || !/^\d{8}$/.test(dropoff.cep.replace(/\D/g, ''))) {
@@ -346,6 +384,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
         requesterPhone: pickup.phone,
         notes: observations,
         ...(branchId ? { branchId } : {}),
+        ...(pickupLocationId ? { pickupLocationId } : {}),
         ...(costCenterId ? { costCenterId } : {}),
       }, token)
       setOrderResult(created)
@@ -469,6 +508,31 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                   </div>
                 </div>
 
+                {companyOrderMode && (
+                  <label className="block text-xs font-semibold text-[#64748b]">
+                    De onde vamos retirar o pedido?
+                    <select
+                      value={pickupLocationId}
+                      onChange={event => choosePickupLocation(event.target.value)}
+                      className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-sm text-[#0f172a]"
+                    >
+                      <option value="">Informar outro endereço</option>
+                      {savedPickupLocations.length > 0 && (
+                        <optgroup label="Selecionar endereço salvo">
+                          {savedPickupLocations.map(location => (
+                            <option key={location.id} value={location.id}>{location.name}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                    {savedPickupLocations.length === 0 && (
+                      <span className="mt-1 block font-normal text-[#94a3b8]">
+                        Nenhum endereço de coleta salvo está disponível.
+                      </span>
+                    )}
+                  </label>
+                )}
+
                 <div className="grid grid-cols-2 gap-3 sm:gap-4">
                   <div className="col-span-2">
                     <InputField label="Nome do Solicitante" value={pickup.name} onChange={setPickupField('name')} placeholder="João Silva" icon={User} required/>
@@ -580,7 +644,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                   <SummaryRow label="Telefone" value={pickup.phone}/>
                   <SummaryRow label="Endereço" value={`${pickup.street}, ${pickup.number}`}/>
                   <SummaryRow label="Bairro" value={pickup.neighborhood}/>
-                  <SummaryRow label="Cidade / CEP" value={`${pickup.city}${pickup.cep ? ` — ${pickup.cep}` : ''}`}/>
+                  <SummaryRow label="Cidade / CEP" value={`${pickup.city} / ${pickup.state}${pickup.cep ? ` — ${pickup.cep}` : ''}`}/>
                   {pickup.complement && <SummaryRow label="Complemento" value={pickup.complement}/>}
                 </div>
 

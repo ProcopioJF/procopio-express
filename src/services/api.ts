@@ -25,6 +25,8 @@ export type ApiOrder = {
   distance?: number | null
 
   priceTableName?: string | null
+  courierId?: string | null
+  courier?: { id: string; user: { name: string } } | null
   recipientName: string
   recipientPhone?: string | null
   companyId?: string | null
@@ -70,6 +72,7 @@ export type CreateApiOrderInput = {
   requesterPhone: string
   notes?: string
   branchId?: string
+  pickupLocationId?: string
   costCenterId?: string
 }
 
@@ -271,11 +274,22 @@ export type PublicSettings = {
 
 export type ApiCompanyMember = Pick<ApiUser, "id" | "name" | "email" | "phone" | "role" | "companyPermission" | "isActive">
 
+export type ApiBranchAddress = {
+  text?: string
+  rua?: string
+  numero?: string
+  bairro?: string
+  cidade?: string
+  estado?: string
+  cep?: string
+  complemento?: string
+}
+
 export type ApiBranch = {
   id: string
   name: string
   phone?: string | null
-  address?: { text?: string } | null
+  address?: ApiBranchAddress | null
   isActive: boolean
 }
 
@@ -978,6 +992,21 @@ export async function updateOrderStatus(
   )
 }
 
+export async function assignOrderCourier(
+  token: string,
+  id: string,
+  courierId: string | null,
+) {
+  return authorizedRequest<{ order: ApiOrder }>(
+    `/admin/orders/${encodeURIComponent(id)}/courier`,
+    token,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ courierId }),
+    },
+  )
+}
+
 export async function getCourierOrders(token: string) {
   return authorizedRequest<{ orders: ApiOrder[] }>("/courier/orders", token)
 }
@@ -1317,7 +1346,11 @@ export async function updateCompanyMember(
 
 export async function createCompanyBranch(
   token: string,
-  branch: { name: string; phone?: string; address?: string },
+  branch: {
+    name: string
+    phone?: string
+    address?: Omit<ApiBranchAddress, "text">
+  },
 ) {
   return authorizedRequest<{ branch: ApiBranch }>("/company/branches", token, {
     method: "POST",
@@ -1332,7 +1365,7 @@ export async function updateCompanyBranch(
   updates: Partial<{
     name: string
     phone: string
-    address: string
+    address: Omit<ApiBranchAddress, "text">
     isActive: boolean
   }>,
 ) {

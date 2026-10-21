@@ -5,17 +5,72 @@ import { describe, it } from "node:test"
 import {
   addressSchema,
   adminOrderStatusSchema,
+  companyBranchPickupAddressSchema,
+  companyBranchSchema,
+  createOrderSchema,
   changePasswordSchema,
   courierOrderStatusSchema,
   financialEntryListQuerySchema,
   financialEntrySchema,
   leadSchema,
   orderListQuerySchema,
+  orderCourierAssignmentSchema,
   planSchema,
   subscriptionSchema,
   systemUserPasswordResetSchema,
   systemUserSchema,
 } from "./validation.js"
+
+describe("saved company pickup address validation", () => {
+  const address = {
+    rua: "Rua Halfeld",
+    numero: "10",
+    bairro: "Centro",
+    cidade: "Juiz de Fora",
+    estado: "MG",
+    cep: "36010000",
+  }
+
+  it("accepts structured addresses and legacy free-text branch addresses", () => {
+    assert.deepEqual(companyBranchPickupAddressSchema.parse(address), address)
+    assert.equal(
+      companyBranchSchema.safeParse({
+        name: "Unidade Centro",
+        address,
+      }).success,
+      true,
+    )
+    assert.equal(
+      companyBranchSchema.safeParse({
+        name: "Unidade antiga",
+        address: "Rua antiga, 20 - Centro",
+      }).success,
+      true,
+    )
+  })
+
+  it("requires complete address fields and allows saved-address selection on an order", () => {
+    assert.equal(
+      companyBranchPickupAddressSchema.safeParse({
+        ...address,
+        numero: "",
+      }).success,
+      false,
+    )
+    assert.equal(
+      createOrderSchema.safeParse({
+        pickupAddress: address,
+        deliveryAddress: address,
+        recipientName: "Destinatário",
+        recipientPhone: "32999990000",
+        requesterName: "Solicitante",
+        requesterPhone: "32988887777",
+        pickupLocationId: "branch-1",
+      }).success,
+      true,
+    )
+  })
+})
 
 describe("system user profile validation", () => {
   const user = {
@@ -139,6 +194,27 @@ describe("admin order status validation", () => {
     )
     assert.equal(
       adminOrderStatusSchema.safeParse({ status: "CANCELLED" }).success,
+      false,
+    )
+  })
+})
+
+describe("order courier assignment validation", () => {
+  it("requires a courier id or null to remove an assignment", () => {
+    assert.equal(
+      orderCourierAssignmentSchema.safeParse({ courierId: "courier-1" }).success,
+      true,
+    )
+    assert.equal(
+      orderCourierAssignmentSchema.safeParse({ courierId: null }).success,
+      true,
+    )
+    assert.equal(
+      orderCourierAssignmentSchema.safeParse({ courierId: "" }).success,
+      false,
+    )
+    assert.equal(
+      orderCourierAssignmentSchema.safeParse({}).success,
       false,
     )
   })

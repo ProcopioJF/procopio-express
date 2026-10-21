@@ -18,7 +18,7 @@ import {
 } from "./services/intelligence.js";
 import { getDashboardCharts } from "./services/dashboard-charts.js";
 import { adminRouter, companyRouter } from "./routes/management.js";
-import { adminOrderStatusSchema, changePasswordSchema, courierOrderStatusSchema, createCompanySchema, intelligenceQuestionSchema, loginSchema, orderListQuerySchema, pricingRouteQuerySchema, pricingRouteSchema, pricingSchema, settingsSchema, whatsappRequestStatusSchema } from "./validation.js";
+import { adminOrderStatusSchema, changePasswordSchema, courierOrderStatusSchema, createCompanySchema, intelligenceQuestionSchema, loginSchema, orderCourierAssignmentSchema, orderListQuerySchema, pricingRouteQuerySchema, pricingRouteSchema, pricingSchema, settingsSchema, whatsappRequestStatusSchema } from "./validation.js";
 
 export const app = express();
 const vercelOrigins = [process.env.VERCEL_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]
@@ -106,7 +106,13 @@ async function listOrders(
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip,
       take: query.pageSize,
-      include: { branch: { select: { name: true } }, costCenter: { select: { name: true } } },
+      include: {
+        branch: { select: { name: true } },
+        costCenter: { select: { name: true } },
+        ...(options.allowCompanyFilter
+          ? { courier: { select: { id: true, user: { select: { name: true } } } } }
+          : {}),
+      },
     }),
     prisma.order.count({ where }),
   ])
@@ -436,6 +442,73 @@ api.patch("/admin/orders/:id/status", requireAuth, async (req, res, next) => {
     })
 
     res.json({ order: updated })
+  } catch (e) { next(e); }
+});
+api.patch("/admin/orders/:id/courier", requireAuth, async (req, res, next) => {
+  try {
+    if (!req.actor || req.actor.role !== "ADMIN") throw new HttpError(403, "Acesso restrito")
+    const { courierId } = orderCourierAssignmentSchema.parse(req.body)
+    const admin = await prisma.user.findUnique({
+      where: { id: req.actor.id },
+      select: { name: true },
+    })
+    if (!admin) throw new HttpError(401, "Usuário administrador não encontrado")
+
+    const order = await prisma.$transaction(async (tx) => {
+      const current = await tx.order.findUnique({
+        where: { id: String(req.params.id) },
+        select: { id: true, status: true, courierId: true },
+      })
+      if (!current) throw new HttpError(404, "Pedido não encontrado")
+      if (!["CONFIRMED", "ASSIGNED"].includes(current.status)) {
+        throw new HttpError(409, "O pedido precisa estar confirmado antes da atribuição ao motoboy")
+      }
+
+      let courierName: string | undefined
+      if (courierId) {
+        const courier = await tx.courier.findUnique({
+          where: { id: courierId },
+          select: {
+            active: true,
+            user: { select: { name: true, isActive: true, role: { select: { name: true } } } },
+          },
+        })
+        if (!courier?.active || !courier.user.isActive || courier.user.role.name !== "COURIER") {
+          throw new HttpError(400, "Selecione um motoboy ativo")
+        }
+        courierName = courier.user.name
+      }
+
+      const nextStatus = courierId ? OrderStatus.ASSIGNED : OrderStatus.CONFIRMED
+      const assignmentChanged = current.courierId !== courierId || current.status !== nextStatus
+      const updated = await tx.order.update({
+        where: { id: current.id },
+        data: { courierId, status: nextStatus },
+        include: { courier: { select: { id: true, user: { select: { name: true } } } } },
+      })
+
+      if (assignmentChanged) {
+        const note = courierName
+          ? `Pedido atribuído ao motoboy ${courierName}.`
+          : "Atribuição do motoboy removida."
+        await tx.orderStatusHistory.create({
+          data: { orderId: current.id, status: nextStatus, changedById: req.actor!.id, note },
+        })
+        await tx.auditLog.create({
+          data: {
+            actorId: req.actor!.id,
+            actorName: admin.name,
+            action: "UPDATE",
+            entity: "Order",
+            entityId: current.id,
+            details: { courierId, status: nextStatus },
+          },
+        })
+      }
+      return updated
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+
+    res.json({ order })
   } catch (e) { next(e); }
 });
 app.use("/api/v1", api);

@@ -1756,7 +1756,7 @@ export default function AdminBusinessPanel({
               <p className="text-xs text-[#718096]">
                 {userForm.role === "COMPANY"
                   ? "A empresa poderá alterar a senha depois, em Segurança da conta no painel empresarial."
-                  : "A senha inicial será usada para entrar no painel. Compartilhe-a com a pessoa por um canal seguro."}
+                  : "A senha inicial será usada para entrar no painel. Depois, a pessoa poderá alterá-la em Segurança da conta. Compartilhe a senha inicial por um canal seguro."}
               </p>
               <div className="flex items-end">
                 <button className={actionClass} disabled={saving}>

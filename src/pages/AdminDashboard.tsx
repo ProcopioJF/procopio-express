@@ -30,12 +30,16 @@ import AdminBusinessPanel from "../components/AdminBusinessPanel"
 
 import AdminPricingPanel from "../components/AdminPricingPanel"
 
+import ChangePasswordPanel from "../components/ChangePasswordPanel"
+
 import Logo from "../components/Logo"
 
 import {
+  assignOrderCourier,
   formatOrderPrice,
   getAdminCompanies,
   getAdminPriceTables,
+  getAdminSystemUsers,
   getDashboardCharts,
   getDashboardSummary,
   getPanelOrders,
@@ -49,6 +53,7 @@ import {
   type ApiOrder,
   type ApiPriceTable,
   type ApiSettings,
+  type ApiSystemUser,
   type ApiUser,
 } from "../services/api"
 
@@ -171,14 +176,87 @@ function MetricCard({
   )
 }
 
+function CourierAssignment({
+  order,
+  couriers,
+  selectedCourierId,
+  onSelectionChange,
+  onAssign,
+  saving,
+}: {
+  order: ApiOrder
+  couriers: ApiSystemUser[]
+  selectedCourierId: string
+  onSelectionChange: (courierId: string) => void
+  onAssign: (order: ApiOrder, courierId: string | null) => void
+  saving: boolean
+}) {
+  if (order.status !== "CONFIRMED" && order.status !== "ASSIGNED") return null
+
+  const currentCourierId = order.courierId ?? ""
+  const changed = selectedCourierId !== currentCourierId
+  const currentCourierInactive =
+    currentCourierId && !couriers.some((courier) => courier.id === currentCourierId)
+
+  return (
+    <div className="flex min-w-44 flex-col gap-1.5">
+      <select
+        aria-label={`Motoboy do pedido ${order.publicId}`}
+        value={selectedCourierId}
+        onChange={(event) => onSelectionChange(event.target.value)}
+        disabled={saving}
+        className="h-9 w-full rounded-lg border border-[#e2e8f0] bg-white px-2 text-[11px] text-[#334155] disabled:opacity-50"
+      >
+        <option value="">Sem motoboy</option>
+        {currentCourierInactive && (
+          <option value={currentCourierId}>
+            {order.courier?.user.name ?? "Motoboy inativo"} (inativo)
+          </option>
+        )}
+        {couriers.map((courier) => (
+          <option key={courier.id} value={courier.id}>
+            {courier.name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={() => onAssign(order, selectedCourierId || null)}
+        disabled={!changed || saving}
+        className="min-h-8 rounded-lg border border-[#d8e2ef] px-2 text-[10px] font-bold text-[#52657f] disabled:opacity-40"
+      >
+        {saving
+          ? "Salvando..."
+          : !changed
+            ? currentCourierId
+              ? "Atribuído"
+              : "Selecione um motoboy"
+            : selectedCourierId
+              ? "Atribuir motoboy"
+              : "Remover atribuição"}
+      </button>
+    </div>
+  )
+}
+
 function OrderTable({
   orders,
   onAdvanceStatus,
   updatingOrderId,
+  couriers,
+  courierSelections,
+  onCourierSelectionChange,
+  onAssignCourier,
+  assigningCourierOrderId,
 }: {
   orders: ApiOrder[]
   onAdvanceStatus: (order: ApiOrder) => void
   updatingOrderId: string | null
+  couriers: ApiSystemUser[]
+  courierSelections: Record<string, string>
+  onCourierSelectionChange: (orderId: string, courierId: string) => void
+  onAssignCourier: (order: ApiOrder, courierId: string | null) => void
+  assigningCourierOrderId: string | null
 }) {
   return (
     <>
@@ -195,6 +273,7 @@ function OrderTable({
               "Unidade / centro de custo",
               "Status",
               "Empresa",
+              "Motoboy",
               "Ação",
             ].map((label) => (
               <th key={label} className="px-4 py-3">
@@ -260,6 +339,18 @@ function OrderTable({
               </td>
               <td className="px-4 py-3 text-[#64748b]">
                 {order.companyId ? "Empresarial" : "Avulso"}
+              </td>
+              <td className="px-4 py-3">
+                <CourierAssignment
+                  order={order}
+                  couriers={couriers}
+                  selectedCourierId={courierSelections[order.id] ?? order.courierId ?? ""}
+                  onSelectionChange={(courierId) =>
+                    onCourierSelectionChange(order.id, courierId)
+                  }
+                  onAssign={onAssignCourier}
+                  saving={assigningCourierOrderId === order.id}
+                />
               </td>
               <td className="px-4 py-3">
                 {nextAdminOrderStep[order.status] && (
@@ -347,6 +438,16 @@ function OrderTable({
                 {formatOrderPrice(order)}
               </strong>
             </div>
+            <CourierAssignment
+              order={order}
+              couriers={couriers}
+              selectedCourierId={courierSelections[order.id] ?? order.courierId ?? ""}
+              onSelectionChange={(courierId) =>
+                onCourierSelectionChange(order.id, courierId)
+              }
+              onAssign={onAssignCourier}
+              saving={assigningCourierOrderId === order.id}
+            />
             {nextStep && (
               <button
                 onClick={() => onAdvanceStatus(order)}
@@ -396,6 +497,10 @@ export default function AdminDashboard({
 
   const [orders, setOrders] = useState<ApiOrder[]>([])
 
+  const [couriers, setCouriers] = useState<ApiSystemUser[]>([])
+
+  const [courierSelections, setCourierSelections] = useState<Record<string, string>>({})
+
   const [companies, setCompanies] = useState<ApiCompany[]>([])
 
   const [priceTables, setPriceTables] = useState<ApiPriceTable[]>([])
@@ -411,6 +516,8 @@ export default function AdminDashboard({
   const [saving, setSaving] = useState(false)
 
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
+
+  const [assigningCourierOrderId, setAssigningCourierOrderId] = useState<string | null>(null)
 
   const [error, setError] = useState("")
 
@@ -446,6 +553,7 @@ export default function AdminDashboard({
         companyResult,
         priceTableResult,
         settingsResult,
+        systemUserResult,
       ] = await Promise.all([
         getPanelOrders(token, "admin"),
 
@@ -458,6 +566,8 @@ export default function AdminDashboard({
         getAdminPriceTables(token),
 
         getSettings(token),
+
+        getAdminSystemUsers(token),
       ])
 
       setOrders(orderResult.orders)
@@ -473,6 +583,12 @@ export default function AdminDashboard({
       setPriceTables(priceTableResult.tables)
 
       setSettings(settingsResult.settings)
+
+      setCouriers(
+        systemUserResult.users.filter(
+          (systemUser) => systemUser.role === "COURIER" && systemUser.isActive,
+        ),
+      )
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -553,6 +669,33 @@ export default function AdminDashboard({
       )
     } finally {
       setUpdatingOrderId(null)
+    }
+  }
+
+  const assignCourier = async (order: ApiOrder, courierId: string | null) => {
+    setAssigningCourierOrderId(order.id)
+    setError("")
+    setNotice("")
+    try {
+      await assignOrderCourier(token, order.id, courierId)
+      setCourierSelections((current) => ({
+        ...current,
+        [order.id]: courierId ?? "",
+      }))
+      setNotice(
+        courierId
+          ? `Pedido #${order.publicId} atribuído ao motoboy.`
+          : `Atribuição do pedido #${order.publicId} removida.`,
+      )
+      await loadOrderPage(orderPagination.page)
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Não foi possível atribuir o motoboy ao pedido.",
+      )
+    } finally {
+      setAssigningCourierOrderId(null)
     }
   }
 
@@ -1156,6 +1299,18 @@ export default function AdminDashboard({
                 orders={filteredOrders}
                 onAdvanceStatus={(order) => void advanceOrderStatus(order)}
                 updatingOrderId={updatingOrderId}
+                couriers={couriers}
+                courierSelections={courierSelections}
+                onCourierSelectionChange={(orderId, courierId) =>
+                  setCourierSelections((current) => ({
+                    ...current,
+                    [orderId]: courierId,
+                  }))
+                }
+                onAssignCourier={(order, courierId) =>
+                  void assignCourier(order, courierId)
+                }
+                assigningCourierOrderId={assigningCourierOrderId}
               />
               <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[#718096]">
                 <span>
@@ -1237,42 +1392,45 @@ export default function AdminDashboard({
               </div>
               {adminTab === "routes" && <AdminPricingPanel token={token} />}
               {adminTab === "settings" && (
-                <div className="max-w-3xl rounded-2xl border border-[#e8edf4] bg-white p-6">
-                  <h3 className="font-bold text-[#102b55]">
-                    Configurações da operação
-                  </h3>
-                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    {([
-                      ["companyName", "Nome da operação"],
-                      ["whatsappOperationsNumber", "WhatsApp operacional"],
-                      ["supportPhone", "Telefone de suporte"],
-                      ["operationCity", "Cidade de operação"],
-                    ] as const).map(([key, label]) => (
-                      <label
-                        key={key}
-                        className="text-xs font-semibold text-[#64748b]"
-                      >
-                        {label}
-                        <input
-                          value={settings[key]}
-                          onChange={(event) =>
-                            setSettings({
-                              ...settings,
-                              [key]: event.target.value,
-                            })
-                          }
-                          className="mt-1 block h-10 w-full rounded-xl border border-[#e2e8f4] bg-[#fbfcfe] px-3 text-sm text-[#102b55]"
-                        />
-                      </label>
-                    ))}
+                <div className="space-y-4">
+                  <div className="max-w-3xl rounded-2xl border border-[#e8edf4] bg-white p-6">
+                    <h3 className="font-bold text-[#102b55]">
+                      Configurações da operação
+                    </h3>
+                    <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                      {([
+                        ["companyName", "Nome da operação"],
+                        ["whatsappOperationsNumber", "WhatsApp operacional"],
+                        ["supportPhone", "Telefone de suporte"],
+                        ["operationCity", "Cidade de operação"],
+                      ] as const).map(([key, label]) => (
+                        <label
+                          key={key}
+                          className="text-xs font-semibold text-[#64748b]"
+                        >
+                          {label}
+                          <input
+                            value={settings[key]}
+                            onChange={(event) =>
+                              setSettings({
+                                ...settings,
+                                [key]: event.target.value,
+                              })
+                            }
+                            className="mt-1 block h-10 w-full rounded-xl border border-[#e2e8f4] bg-[#fbfcfe] px-3 text-sm text-[#102b55]"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <button
+                      disabled={saving}
+                      onClick={() => void saveOperation()}
+                      className="mt-5 rounded-xl bg-[#0c225a] px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+                    >
+                      {saving ? "Salvando…" : "Salvar configurações"}
+                    </button>
                   </div>
-                  <button
-                    disabled={saving}
-                    onClick={() => void saveOperation()}
-                    className="mt-5 rounded-xl bg-[#0c225a] px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
-                  >
-                    {saving ? "Salvando…" : "Salvar configurações"}
-                  </button>
+                  <ChangePasswordPanel token={token} />
                 </div>
               )}
               {adminTab === "users" && (

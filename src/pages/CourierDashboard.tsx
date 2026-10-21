@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { LogOut, MapPin, Package, RefreshCw } from "lucide-react"
 import Logo from "../components/Logo"
+import ChangePasswordPanel from "../components/ChangePasswordPanel"
 import {
   getCourierOrders,
   ORDER_STATUS_LABELS,
@@ -116,6 +117,7 @@ export default function CourierDashboard({
       </header>
 
       <section className="mx-auto max-w-5xl space-y-4 px-4 py-5 sm:px-6 sm:py-7">
+        <ChangePasswordPanel token={token} />
         <div>
           <h2 className="text-lg font-extrabold text-[#0f3266]">Meus pedidos</h2>
           <p className="mt-1 text-xs text-[#718096]">

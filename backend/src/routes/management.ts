@@ -1,7 +1,9 @@
 import { Prisma } from "@prisma/client";
 import express, { type Request, type RequestHandler, type Response } from "express";
+import { z } from "zod";
 import {
   companyBranchSchema,
+  companyBranchPickupAddressSchema,
   companyCostCenterSchema,
   companyMemberSchema,
   companyMemberUpdateSchema,
@@ -36,6 +38,21 @@ const companyRouter = express.Router();
 
 const route = (handler: (req: Request, res: Response) => Promise<void>): RequestHandler =>
   (req, res, next) => { void handler(req, res).catch(next); };
+
+function serializeCompanyBranchAddress(
+  address: string | z.infer<typeof companyBranchPickupAddressSchema> | null | undefined,
+) {
+  if (!address) return Prisma.JsonNull;
+  if (typeof address === "string") return { text: address };
+  const text = [
+    `${address.rua}, ${address.numero}`,
+    address.complemento,
+    address.bairro,
+    `${address.cidade}, ${address.estado}`,
+    address.cep ? `CEP ${address.cep}` : undefined,
+  ].filter(Boolean).join(", ");
+  return { ...address, text };
+}
 
 const requireAdmin: RequestHandler = (req, _res, next) => {
   if (req.actor?.role !== "ADMIN") return next(new HttpError(403, "Acesso restrito"));
@@ -796,7 +813,7 @@ companyRouter.post("/branches", route(async (req, res) => {
       companyId: id,
       name: data.name,
       phone: data.phone,
-      address: data.address ? { text: data.address } : Prisma.JsonNull,
+      address: serializeCompanyBranchAddress(data.address),
     },
   });
   await audit(req, "CREATE", "CompanyBranch", branch.id, { companyId: id });
@@ -816,7 +833,7 @@ companyRouter.patch("/branches/:id", route(async (req, res) => {
       name: data.name,
       phone: data.phone,
       ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
-      ...(data.address !== undefined ? { address: data.address ? { text: data.address } : Prisma.JsonNull } : {}),
+      ...(data.address !== undefined ? { address: serializeCompanyBranchAddress(data.address) } : {}),
     },
   });
   await audit(req, "UPDATE", "CompanyBranch", branch.id, { isActive: branch.isActive });

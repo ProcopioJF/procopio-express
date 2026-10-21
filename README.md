@@ -169,14 +169,15 @@ para as requisições serverless, não para migrations. O build e a inicializaç
 das funções Vercel não aplicam migrations. Nenhuma credencial do Supabase ou da
 Meta deve ser commitada.
 
-### Estado publicado em 4 de outubro de 2026
+### Estado de Produção verificado em 19 de outubro de 2026
 
-A Production está publicada em `https://procopio-express.vercel.app/`, usando o
-deployment do commit `6cd4b78` na branch `preview/supabase-vercel`. As variáveis
-`DATABASE_URL` e `JWT_SECRET` estão configuradas no ambiente Production da
-Vercel, sem compartilhar valores com Preview. As 11 migrations Prisma estão
-aplicadas ao Supabase Production. A verificação confirmou `/health` com banco
-saudável, `/api/v1/public/settings` respondendo e o mapa carregando.
+A Production está publicada em `https://procopio-express.vercel.app/`, com o
+commit `ab2e34b` na branch `main`. Após a reativação do projeto Supabase
+Production, `npm run prisma:migrate:status` confirmou que as 11 migrations
+estão sincronizadas; `/health` respondeu `{"status":"ok","database":"ok"}` e
+`/api/v1/public/settings` e a consulta pública de tarifas responderam com
+sucesso. O projeto havia ficado indisponível enquanto o banco estava pausado.
+As variáveis de Production da Vercel não devem ser compartilhadas com Preview.
 
 As tarifas oficiais importadas e validadas no Supabase de teste foram copiadas
 para Production em 4 de outubro, após autorização. Foram importadas 4 tabelas,
@@ -216,6 +217,10 @@ controlado; não crie pedidos artificiais na Production.
    QUOTE ou uma rota sem tarifa são registrados sem preço e exibidos como
    “Consultar valor”.
 4. Pedidos empresariais são associados somente à empresa presente no JWT.
+   Administradores da empresa podem cadastrar endereços estruturados na aba
+   Filiais; no formulário empresarial, a origem pode ser selecionada pelo nome
+   ou informada manualmente. O servidor valida a propriedade do endereço e usa
+   os dados cadastrados no mesmo cálculo de tarifa já existente.
 5. Ao finalizar, grava o pedido com status `FINALIZED` e dispara a notificação
    operacional.
 6. No painel Admin, a mesma conta pode confirmar o pedido, confirmar a coleta,

@@ -40,10 +40,12 @@ describe("buildNewOrderWhatsAppMessage", () => {
     })
 
     assert.match(message, /EMPRESA: Acme Logística/)
+    assert.match(message, /Solicitante: Operador Interno/)
+    assert.match(message, /Telefone: 32999990000/)
+    assert.match(message, /Coleta: Rua da Coleta, 10, Sala 2, Centro - Juiz de Fora - MG, CEP 36000-000/)
     assert.match(message, /Recebedor: Maria Silva/)
     assert.match(message, /Telefone: 32988887777/)
     assert.match(message, /Rua da Entrega, 25, Casa B, Cascatinha - Juiz de Fora - MG, CEP 36000-001/)
-    assert.doesNotMatch(message, /Operador Interno|Rua da Coleta|32999990000/)
   })
 
   it("identifies the requester, pickup, and delivery for ad-hoc orders", () => {
@@ -82,7 +84,7 @@ describe("buildNewOrderWhatsAppMessage", () => {
       }),
       [
         "pedido-empresa",
-        "Empresa: Acme Logística",
+        "Empresa: Acme Logística\nSolicitante: Operador Interno\nTelefone: 32999990000\nColeta: Rua da Coleta, 10, Sala 2, Centro - Juiz de Fora - MG, CEP 36000-000",
         "Maria Silva",
         "Rua da Entrega, 25, Casa B, Cascatinha - Juiz de Fora - MG, CEP 36000-001",
         "32988887777",

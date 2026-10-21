@@ -1,12 +1,34 @@
 import { OrderStatus, Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { HttpError } from "../middleware/errors.js";
-import { createOrderSchema } from "../validation.js";
+import {
+  companyBranchPickupAddressSchema,
+  createOrderSchema,
+} from "../validation.js";
 import { getRoutePrice } from "./pricing.js";
 
 export async function createOrder(input: unknown, createdById?: string, companyId?: string) {
   const data = createOrderSchema.parse(input);
-  const p = data.pickupAddress, d = data.deliveryAddress;
+  const { pickupLocationId, ...orderData } = data;
+  let p = data.pickupAddress;
+  const d = data.deliveryAddress;
+  if (pickupLocationId && !companyId) {
+    throw new HttpError(400, "Endereços salvos só podem ser usados em pedidos empresariais.");
+  }
+  if (pickupLocationId && companyId) {
+    const savedLocation = await prisma.companyBranch.findFirst({
+      where: { id: pickupLocationId, companyId, isActive: true },
+      select: { address: true },
+    });
+    if (!savedLocation) {
+      throw new HttpError(404, "Endereço de coleta não encontrado ou inativo nesta empresa.");
+    }
+    const savedAddress = companyBranchPickupAddressSchema.safeParse(savedLocation.address);
+    if (!savedAddress.success) {
+      throw new HttpError(422, "O endereço salvo não possui os campos necessários para criar o pedido.");
+    }
+    p = { ...savedAddress.data, coordinates: data.pickupAddress.coordinates };
+  }
   const city = p.cidade || "Juiz de Fora";
   if (d.cidade && d.cidade.localeCompare(city, "pt-BR", { sensitivity: "base" }) !== 0) {
     throw new HttpError(422, "Coleta e entrega precisam estar na mesma cidade.");
@@ -19,6 +41,12 @@ export async function createOrder(input: unknown, createdById?: string, companyI
   return prisma.$transaction(async tx => {
     let customerId: string | undefined;
     if (companyId) {
+      if (pickupLocationId && !await tx.companyBranch.findFirst({
+        where: { id: pickupLocationId, companyId, isActive: true },
+        select: { id: true },
+      })) {
+        throw new HttpError(404, "Endereço de coleta não encontrado ou inativo nesta empresa.");
+      }
       if (data.branchId && !await tx.companyBranch.findFirst({ where: { id: data.branchId, companyId, isActive: true } })) {
         throw new HttpError(404, "Filial não encontrada ou inativa nesta empresa.");
       }
@@ -40,7 +68,7 @@ export async function createOrder(input: unknown, createdById?: string, companyI
         : await tx.customer.create({ data: { companyId, name: data.recipientName, phone: data.recipientPhone, address: recipientAddress } });
       customerId = customer.id;
     }
-    return tx.order.create({ data: { ...data, customerId,
+    return tx.order.create({ data: { ...orderData, pickupAddress: p as Prisma.InputJsonValue, customerId,
       price: price.pricingType === "FIXED" || price.pricingType === "PER_KM" ? price.price : null,
       distance: price.distanceKm,
       perKmRate: price.perKmRate,
@@ -50,7 +78,7 @@ export async function createOrder(input: unknown, createdById?: string, companyI
       priceTableName: price.priceTable,
       priceTableId: price.priceTableId,
       pricingRouteId: price.pricingRouteId,
-      pickupAddress: p as Prisma.InputJsonValue, deliveryAddress: d as Prisma.InputJsonValue,
+      deliveryAddress: d as Prisma.InputJsonValue,
       pickupCep:p.cep, pickupStreet:p.rua, pickupNumber:p.numero, pickupNeighborhood:p.bairro, pickupComplement:p.complemento, pickupCity:p.cidade, pickupState:p.estado,
       deliveryCep:d.cep, deliveryStreet:d.rua, deliveryNumber:d.numero, deliveryNeighborhood:d.bairro, deliveryComplement:d.complemento, deliveryCity:d.cidade, deliveryState:d.estado,
       pickupLatitude:p.coordinates?.latitude, pickupLongitude:p.coordinates?.longitude, deliveryLatitude:d.coordinates?.latitude, deliveryLongitude:d.coordinates?.longitude,

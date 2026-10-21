@@ -54,7 +54,12 @@ export function buildNewOrderWhatsAppMessage(order: OrderMessageData) {
   ]
 
   if (order.companyId) {
-    lines.push(`🏢 EMPRESA: ${order.company?.name ?? "Não identificada"}`)
+    lines.push(
+      `🏢 EMPRESA: ${order.company?.name ?? "Não identificada"}`,
+      `👤 Solicitante: ${order.requesterName ?? "Não informado"}`,
+      `📱 Telefone: ${order.requesterPhone ?? "Não informado"}`,
+      `📍 Coleta: ${formatAddress(order.pickupAddress) || "Endereço não informado"}`,
+    )
   } else {
     lines.push(`👤 ${requesterOrCompany}`)
   }
@@ -74,7 +79,12 @@ export function buildNewOrderWhatsAppTemplateParameters(
   order: OrderMessageData,
 ): [string, string, string, string, string] {
   const requesterOrCompany = order.companyId
-    ? `Empresa: ${order.company?.name ?? "Não identificada"}`
+    ? [
+        `Empresa: ${order.company?.name ?? "Não identificada"}`,
+        `Solicitante: ${order.requesterName ?? "Não informado"}`,
+        `Telefone: ${order.requesterPhone ?? "Não informado"}`,
+        `Coleta: ${formatAddress(order.pickupAddress) || "Endereço não informado"}`,
+      ].join("\n")
     : [
         `Solicitante: ${order.requesterName ?? "Não informado"}`,
         `Telefone: ${order.requesterPhone ?? "Não informado"}`,

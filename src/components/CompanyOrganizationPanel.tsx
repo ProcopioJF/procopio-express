@@ -24,6 +24,18 @@ type Tab = "profile" | "users" | "cost-centers" | "branches"
 
 type InputProps = InputHTMLAttributes<HTMLInputElement> & { label: string }
 
+const emptyBranchForm = () => ({
+  name: "",
+  phone: "",
+  rua: "",
+  numero: "",
+  bairro: "",
+  cidade: "",
+  estado: "",
+  cep: "",
+  complemento: "",
+})
+
 function Input({ label, ...props }: InputProps) {
   return (
     <label className="block text-xs font-semibold text-[#718096]">
@@ -74,6 +86,7 @@ export default function CompanyOrganizationPanel({
   const [saving, setSaving] = useState(false)
 
   const [showForm, setShowForm] = useState(false)
+  const [editingBranchId, setEditingBranchId] = useState("")
 
   const [memberForm, setMemberForm] = useState({
     name: "",
@@ -83,11 +96,7 @@ export default function CompanyOrganizationPanel({
     companyPermission: "STANDARD" as NonNullable<ApiUser["companyPermission"]>,
   })
 
-  const [branchForm, setBranchForm] = useState({
-    name: "",
-    phone: "",
-    address: "",
-  })
+  const [branchForm, setBranchForm] = useState(emptyBranchForm)
 
   const [costCenterForm, setCostCenterForm] = useState({ name: "", code: "" })
 
@@ -163,7 +172,42 @@ export default function CompanyOrganizationPanel({
   const submitBranch = (event: FormEvent) => {
     event.preventDefault()
 
-    void run(() => createCompanyBranch(token, branchForm), "Filial cadastrada.")
+    const { name, phone, ...address } = branchForm
+    const branch = {
+      name,
+      phone,
+      address: {
+        ...address,
+        cep: address.cep.replace(/\D/g, "") || undefined,
+        complemento: address.complemento || undefined,
+      },
+    }
+    void run(
+      () => editingBranchId
+        ? updateCompanyBranch(token, editingBranchId, branch)
+        : createCompanyBranch(token, branch),
+      editingBranchId ? "Endereço atualizado." : "Endereço de coleta cadastrado.",
+    ).then(saved => {
+      if (!saved) return
+      setEditingBranchId("")
+      setBranchForm(emptyBranchForm())
+    })
+  }
+
+  const editBranch = (branch: ApiBranch) => {
+    setEditingBranchId(branch.id)
+    setBranchForm({
+      name: branch.name,
+      phone: branch.phone ?? "",
+      rua: branch.address?.rua ?? "",
+      numero: branch.address?.numero ?? "",
+      bairro: branch.address?.bairro ?? "",
+      cidade: branch.address?.cidade ?? "",
+      estado: branch.address?.estado ?? "",
+      cep: branch.address?.cep ?? "",
+      complemento: branch.address?.complemento ?? "",
+    })
+    setShowForm(true)
   }
 
   const submitCostCenter = (event: FormEvent) => {
@@ -581,7 +625,7 @@ export default function CompanyOrganizationPanel({
           {showForm && canManage && (
             <form onSubmit={submitBranch} className={formClass}>
               <Input
-                label="Nome da filial"
+                label="Nome do endereço"
                 required
                 value={branchForm.name}
                 onChange={(event) =>
@@ -596,16 +640,80 @@ export default function CompanyOrganizationPanel({
                 }
               />
               <Input
-                label="Endereço"
-                value={branchForm.address}
+                label="Rua / Avenida"
+                value={branchForm.rua}
                 onChange={(event) =>
-                  setBranchForm({ ...branchForm, address: event.target.value })
+                  setBranchForm({ ...branchForm, rua: event.target.value })
+                }
+                required
+              />
+              <Input
+                label="Número"
+                value={branchForm.numero}
+                onChange={(event) =>
+                  setBranchForm({ ...branchForm, numero: event.target.value })
+                }
+                required
+              />
+              <Input
+                label="Bairro"
+                value={branchForm.bairro}
+                onChange={(event) =>
+                  setBranchForm({ ...branchForm, bairro: event.target.value })
+                }
+                required
+              />
+              <Input
+                label="Cidade"
+                value={branchForm.cidade}
+                onChange={(event) =>
+                  setBranchForm({ ...branchForm, cidade: event.target.value })
+                }
+                required
+              />
+              <Input
+                label="Estado"
+                value={branchForm.estado}
+                onChange={(event) =>
+                  setBranchForm({ ...branchForm, estado: event.target.value.toUpperCase().slice(0, 2) })
+                }
+                maxLength={2}
+                required
+              />
+              <Input
+                label="CEP (opcional)"
+                value={branchForm.cep}
+                onChange={(event) =>
+                  setBranchForm({
+                    ...branchForm,
+                    cep: event.target.value.replace(/\D/g, "").slice(0, 8),
+                  })
+                }
+              />
+              <Input
+                label="Complemento (opcional)"
+                value={branchForm.complemento}
+                onChange={(event) =>
+                  setBranchForm({ ...branchForm, complemento: event.target.value })
                 }
               />
               <div className="flex items-end">
                 <button disabled={saving} className={buttonClass}>
-                  Salvar filial
+                  {editingBranchId ? "Salvar alterações" : "Salvar endereço"}
                 </button>
+                {editingBranchId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingBranchId("")
+                      setBranchForm(emptyBranchForm())
+                      setShowForm(false)
+                    }}
+                    className="h-10 rounded-xl border border-[#e8edf4] px-4 text-xs font-bold text-[#718096]"
+                  >
+                    Cancelar
+                  </button>
+                )}
               </div>
             </form>
           )}
@@ -628,36 +736,59 @@ export default function CompanyOrganizationPanel({
                   </span>
                 </div>
                 <p className="mt-2 text-xs text-[#718096]">
-                  {branch.address?.text || "Endereço não informado"}
+                  {branch.address?.text ||
+                    [
+                      [branch.address?.rua, branch.address?.numero]
+                        .filter(Boolean)
+                        .join(", "),
+                      branch.address?.complemento,
+                      branch.address?.bairro,
+                      [branch.address?.cidade, branch.address?.estado]
+                        .filter(Boolean)
+                        .join(", "),
+                      branch.address?.cep ? `CEP ${branch.address.cep}` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(", ") ||
+                    "Endereço não informado"}
                 </p>
                 <p className="mt-1 text-xs text-[#718096]">
                   {branch.phone || "Telefone não informado"}
                 </p>
                 {canManage && (
-                  <button
-                    disabled={saving}
-                    onClick={() =>
-                      void run(
-                        () =>
-                          updateCompanyBranch(token, branch.id, {
-                            isActive: !branch.isActive,
-                          }),
-                        branch.isActive
-                          ? "Filial desativada."
-                          : "Filial reativada.",
-                      )
-                    }
-                    className="mt-3 rounded-lg border border-[#e8edf4] px-3 py-2 text-xs font-semibold"
-                  >
-                    {branch.isActive ? "Desativar filial" : "Reativar filial"}
-                  </button>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      disabled={saving}
+                      onClick={() => editBranch(branch)}
+                      className="rounded-lg border border-[#e8edf4] px-3 py-2 text-xs font-semibold"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      disabled={saving}
+                      onClick={() =>
+                        void run(
+                          () =>
+                            updateCompanyBranch(token, branch.id, {
+                              isActive: !branch.isActive,
+                            }),
+                          branch.isActive
+                            ? "Filial desativada."
+                            : "Filial reativada.",
+                        )
+                      }
+                      className="rounded-lg border border-[#e8edf4] px-3 py-2 text-xs font-semibold"
+                    >
+                      {branch.isActive ? "Desativar filial" : "Reativar filial"}
+                    </button>
+                  </div>
                 )}
               </article>
             ))}
           </div>
           {organization?.branches.length === 0 && (
             <p className="rounded-2xl border border-[#e8edf4] bg-white p-8 text-center text-sm text-[#718096]">
-              Nenhuma filial cadastrada.
+              Nenhum endereço de coleta cadastrado.
             </p>
           )}
         </>
