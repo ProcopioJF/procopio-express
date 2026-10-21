@@ -6,14 +6,15 @@ import { loginRequest, type ApiUser } from '../services/api'
 interface LoginPageProps {
   onLogin: (session: { token: string; user: ApiUser }) => void
   onBack: () => void
+  notice?: string
 }
 
-export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
+export default function LoginPage({ onLogin, onBack, notice }: LoginPageProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(notice ?? '')
   const [forgotMode, setForgotMode] = useState(false)
 
   const handleLogin = async () => {

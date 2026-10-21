@@ -425,10 +425,20 @@ export async function currentUserRequest(token: string) {
     headers: { Authorization: `Bearer ${token}` },
   })
 
-  if (!response.ok) throw new Error("Sessão expirada.")
+  if (response.status === 401) throw new SessionExpiredError()
+  if (!response.ok) throw new Error("Não foi possível validar a sessão.")
 
   return (await response.json()) as { user: ApiUser }
 }
+
+export class SessionExpiredError extends Error {
+  constructor() {
+    super("Sua sessão expirou. Entre novamente.")
+    this.name = "SessionExpiredError"
+  }
+}
+
+export const SESSION_EXPIRED_EVENT = "px-session-expired"
 
 export async function changePasswordRequest(
   token: string,
@@ -458,6 +468,10 @@ async function authorizedRequest<T>(
   })
 
   const body = await response.json().catch(() => ({}))
+
+  if (response.status === 401) {
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+  }
 
   if (!response.ok)
     throw new Error(body.error || "Não foi possível carregar os dados.")

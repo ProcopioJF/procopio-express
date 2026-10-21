@@ -1,7 +1,12 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import PublicPortal from './pages/PublicPortal'
 import LoginPage from './pages/LoginPage'
-import type { ApiUser } from './services/api'
+import {
+  currentUserRequest,
+  SESSION_EXPIRED_EVENT,
+  SessionExpiredError,
+  type ApiUser,
+} from './services/api'
 
 const CompanyDashboard = lazy(() => import('./pages/CompanyDashboard'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
@@ -27,8 +32,64 @@ export default function App() {
   const [view, setView] = useState<AppView>(() => {
     return session ? viewForRole(session.user.role) : 'public'
   })
+  const [isCheckingSession, setIsCheckingSession] = useState(Boolean(session))
+  const [sessionMessage, setSessionMessage] = useState('')
+
+  useEffect(() => {
+    const token = session?.token
+    let active = true
+    const expireSession = () => {
+      localStorage.removeItem('px-auth-token')
+      localStorage.removeItem('px-auth-user')
+      setSession(null)
+      setView('login')
+      setSessionMessage('Sua sessão expirou. Entre novamente.')
+    }
+    const handleSessionExpired = () => expireSession()
+
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired)
+
+    if (!token) {
+      setIsCheckingSession(false)
+      return () => {
+        active = false
+        window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired)
+      }
+    }
+
+    setIsCheckingSession(true)
+    currentUserRequest(token)
+      .then(({ user }) => {
+        if (!active) return
+        localStorage.setItem('px-auth-user', JSON.stringify(user))
+        setSession(current => current?.token === token ? { token, user } : current)
+        setView(viewForRole(user.role))
+      })
+      .catch(error => {
+        if (!active) return
+        if (error instanceof SessionExpiredError) {
+          expireSession()
+        } else {
+          setSessionMessage(
+            error instanceof Error
+              ? error.message
+              : 'Não foi possível validar a sessão.',
+          )
+        }
+      })
+      .finally(() => {
+        if (active) setIsCheckingSession(false)
+      })
+
+    return () => {
+      active = false
+      window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired)
+    }
+  }, [session?.token])
 
   const handleLogin = (next: { token: string; user: ApiUser }) => {
+    setSessionMessage('')
+    setIsCheckingSession(true)
     localStorage.setItem('px-auth-token', next.token)
     localStorage.setItem('px-auth-user', JSON.stringify(next.user))
     setSession(next)
@@ -44,8 +105,16 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
+      {session && sessionMessage && !isCheckingSession && (
+        <p
+          role="alert"
+          className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm text-amber-900"
+        >
+          {sessionMessage} Atualize a página e tente novamente.
+        </p>
+      )}
       <Suspense fallback={null}>
-        {view === 'public' && (
+        {!isCheckingSession && view === 'public' && (
           <PublicPortal
             onGoToLogin={() => setView('login')}
             token={session?.token}
@@ -53,19 +122,20 @@ export default function App() {
             onGoToDashboard={session ? () => setView(viewForRole(session.user.role)) : undefined}
           />
         )}
-        {view === 'login' && (
+        {!isCheckingSession && view === 'login' && (
           <LoginPage
             onLogin={handleLogin}
             onBack={() => setView('public')}
+            notice={sessionMessage}
           />
         )}
-        {view === 'company' && (
+        {!isCheckingSession && view === 'company' && (
           session && <CompanyDashboard token={session.token} user={session.user} onLogout={handleLogout} onNewOrder={() => setView('public')} />
         )}
-        {view === 'admin' && (
+        {!isCheckingSession && view === 'admin' && (
           session && <AdminDashboard token={session.token} user={session.user} onLogout={handleLogout} onNewOrder={() => setView('public')} />
         )}
-        {view === 'courier' && (
+        {!isCheckingSession && view === 'courier' && (
           session && <CourierDashboard token={session.token} name={session.user.name} onLogout={handleLogout} />
         )}
       </Suspense>
