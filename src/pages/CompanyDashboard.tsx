@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 
 import {
+  Activity,
   BarChart3,
   Building2,
   CircleDollarSign,
@@ -12,6 +13,7 @@ import {
   Package,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   RefreshCw,
   Search,
   Sparkles,
@@ -44,13 +46,15 @@ import {
 type Section = "overview" | "orders" | "intelligence" | "finance" | "reports" | "profile"
 
 const NAV: Array<{
-  id: Section
+  id: Section | "new-order"
   label: string
   icon: typeof LayoutDashboard
 }> = [
   { id: "overview", label: "Visão Geral", icon: LayoutDashboard },
 
-  { id: "orders", label: "Entregas", icon: Package },
+  { id: "new-order", label: "Solicitar entrega", icon: Plus },
+
+  { id: "orders", label: "Minhas entregas", icon: Package },
 
   { id: "intelligence", label: "Procópio Intelligence", icon: Sparkles },
 
@@ -69,6 +73,17 @@ const EMPTY_SUMMARY: ApiDashboardSummary = {
   month: { orders: 0, total: 0, average: 0 },
 
   allTime: { orders: 0, total: 0, average: 0 },
+
+  statusCounts: {
+    PENDING: 0,
+    FINALIZED: 0,
+    CONFIRMED: 0,
+    ASSIGNED: 0,
+    PICKED_UP: 0,
+    IN_TRANSIT: 0,
+    DELIVERED: 0,
+    CANCELLED: 0,
+  },
 
   timezone: "America/Sao_Paulo",
 }
@@ -351,7 +366,9 @@ export default function CompanyDashboard({
 
   const [search, setSearch] = useState("")
 
-  const [orderFilter, setOrderFilter] = useState<"all" | "completed">("all")
+  const [orderFilter, setOrderFilter] = useState<
+    "all" | "COMPLETED" | ApiOrder["status"]
+  >("all")
 
   const [orderFrom, setOrderFrom] = useState("")
 
@@ -423,7 +440,7 @@ export default function CompanyDashboard({
         page,
         pageSize: 25,
         search: search.trim(),
-        status: orderFilter === "completed" ? "COMPLETED" : undefined,
+        status: orderFilter === "all" ? undefined : orderFilter,
         from: orderFrom || undefined,
         to: orderTo || undefined,
       })
@@ -446,7 +463,7 @@ export default function CompanyDashboard({
       const query = {
         pageSize: 100,
         search: search.trim(),
-        status: orderFilter === "completed" ? "COMPLETED" as const : undefined,
+        status: orderFilter === "all" ? undefined : orderFilter,
         from: orderFrom || undefined,
         to: orderTo || undefined,
       }
@@ -582,6 +599,12 @@ export default function CompanyDashboard({
   const title = NAV.find((item) => item.id === section)?.label ?? "Visão Geral"
 
   const companyName = profile.name || user.name
+  const companyAccessLabel =
+    user.companyPermission === "ADMIN"
+      ? "Administrador da própria empresa"
+      : user.companyPermission === "RESTRICTED"
+        ? "Acesso restrito à empresa"
+        : "Usuário da empresa"
 
   return (
     <div className="relative flex h-dvh overflow-hidden bg-[#f5f7fb] text-[#1a2b43] md:h-screen">
@@ -633,17 +656,21 @@ export default function CompanyDashboard({
             {companyName}
           </b>
           <small className="mt-1 block text-[10px] text-[#8795a8]">
-            Plano empresarial
+            {companyAccessLabel}
           </small>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {NAV.map(({ id, label, icon: Icon }) => (
+          {NAV.filter(
+            ({ id }) =>
+              id !== "new-order" || user.companyPermission !== "RESTRICTED",
+          ).map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               title={label}
               onClick={() => {
-                setSection(id)
                 setMobileMenuOpen(false)
+                if (id === "new-order") onNewOrder()
+                else setSection(id)
               }}
               aria-current={section === id ? "page" : undefined}
               className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-semibold transition-colors duration-200 ${
@@ -673,7 +700,7 @@ export default function CompanyDashboard({
           <div className="min-w-0 flex-1">
             <b className="block truncate text-xs text-[#102b55]">{user.name}</b>
             <small className="text-[10px] text-[#8795a8]">
-              Gestor empresarial
+              {companyAccessLabel}
             </small>
           </div>
         </div>
@@ -750,7 +777,7 @@ export default function CompanyDashboard({
                 onClick={onNewOrder}
                 className="flex h-9 items-center gap-1.5 rounded-xl bg-[#f47b20] px-2.5 text-[11px] font-bold text-white transition hover:bg-[#df6d17] sm:gap-2 sm:px-4 sm:text-xs"
               >
-                <Package size={14} /> Registrar pedido
+                <Package size={14} /> Solicitar entrega
               </button>
             )}
           </div>
@@ -831,6 +858,38 @@ export default function CompanyDashboard({
                   tone="bg-[#fff5e7] text-[#c88724]"
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+                <MetricCard
+                  label="Em andamento"
+                  value={(
+                    summary.statusCounts.PENDING +
+                    summary.statusCounts.CONFIRMED +
+                    summary.statusCounts.ASSIGNED +
+                    summary.statusCounts.PICKED_UP +
+                    summary.statusCounts.IN_TRANSIT
+                  ).toLocaleString("pt-BR")}
+                  detail="Pedidos ativos"
+                  icon={Activity}
+                  tone="bg-[#edf5ff] text-[#3778c2]"
+                />
+                <MetricCard
+                  label="Concluídas"
+                  value={(
+                    summary.statusCounts.FINALIZED +
+                    summary.statusCounts.DELIVERED
+                  ).toLocaleString("pt-BR")}
+                  detail="Finalizadas ou entregues"
+                  icon={Package}
+                  tone="bg-[#eff9f2] text-[#3d9a62]"
+                />
+                <MetricCard
+                  label="Canceladas"
+                  value={summary.statusCounts.CANCELLED.toLocaleString("pt-BR")}
+                  detail="No histórico da empresa"
+                  icon={Package}
+                  tone="bg-[#fff3e9] text-[#e97820]"
+                />
+              </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <MetricCard
                   label="Valor dos pedidos hoje"
@@ -862,6 +921,20 @@ export default function CompanyDashboard({
                 />
               </div>
               <DashboardChartsPanel data={charts} />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-bold text-[#102b55]">
+                    Solicitações recentes
+                  </h3>
+                  <button
+                    onClick={() => setSection("orders")}
+                    className="text-xs font-bold text-[#c76216] hover:underline"
+                  >
+                    Ver todas
+                  </button>
+                </div>
+                <OrdersTable orders={orders.slice(0, 5)} />
+              </div>
             </div>
           )}
 
@@ -877,24 +950,31 @@ export default function CompanyDashboard({
                   </p>
                 </div>
                 <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
-                  <div className="flex rounded-xl border border-[#e8edf4] bg-white p-1">
-                    {([
-                      ["all", "Todos"],
-                      ["completed", "Concluídas"],
-                    ] as const).map(([filter, label]) => (
-                      <button
-                        key={filter}
-                        onClick={() => setOrderFilter(filter)}
-                        className={`rounded-lg px-3 py-2 text-xs font-bold ${
-                          orderFilter === filter
-                            ? "bg-[#fff3e9] text-[#c76216]"
-                            : "text-[#718096] hover:bg-[#f8fafc]"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+                  <label className="text-[10px] text-[#718096]">
+                    Status
+                    <select
+                      value={orderFilter}
+                      onChange={(event) =>
+                        setOrderFilter(
+                          event.target.value as
+                            | "all"
+                            | "COMPLETED"
+                            | ApiOrder["status"],
+                        )
+                      }
+                      className="mt-1 h-9 rounded-xl border border-[#e8edf4] bg-white px-3 text-xs font-semibold text-[#52657f]"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="COMPLETED">Concluídas</option>
+                      {Object.entries(ORDER_STATUS_LABELS).map(
+                        ([status, label]) => (
+                          <option key={status} value={status}>
+                            {label}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
                   <label className="relative basis-full md:hidden">
                     <Search
                       size={14}
@@ -993,9 +1073,30 @@ export default function CompanyDashboard({
                   Valores informativos registrados nas solicitações da empresa.
                 </p>
               </div>
-              <div className="max-w-xl">
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
                 <MetricCard
-                  label="Valor total registrado nos pedidos"
+                  label="Gasto hoje"
+                  value={money(summary.today.total)}
+                  detail={`${summary.today.orders} entregas`}
+                  icon={CircleDollarSign}
+                  tone="bg-[#fff3e9] text-[#e97820]"
+                />
+                <MetricCard
+                  label="Gasto na semana"
+                  value={money(summary.week.total)}
+                  detail={`${summary.week.orders} entregas`}
+                  icon={CircleDollarSign}
+                  tone="bg-[#edf5ff] text-[#3778c2]"
+                />
+                <MetricCard
+                  label="Gasto no mês"
+                  value={money(summary.month.total)}
+                  detail={`${summary.month.orders} entregas`}
+                  icon={CircleDollarSign}
+                  tone="bg-[#eff9f2] text-[#3d9a62]"
+                />
+                <MetricCard
+                  label="Total registrado"
                   value={money(summary.allTime.total)}
                   detail={`${summary.allTime.orders} pedidos · média de ${money(summary.allTime.average)} por pedido`}
                   icon={CircleDollarSign}

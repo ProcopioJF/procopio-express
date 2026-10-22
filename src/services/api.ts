@@ -107,6 +107,7 @@ export type ApiDashboardSummary = {
   week: ApiPeriodSummary
   month: ApiPeriodSummary
   allTime: ApiPeriodSummary
+  statusCounts: Record<ApiOrder["status"], number>
   timezone: string
 }
 

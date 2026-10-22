@@ -1,4 +1,4 @@
-import { OrderStatus, Prisma } from "@prisma/client";
+import { OrderStatus, Prisma, type CompanyPermission } from "@prisma/client";
 import { prisma } from "../db.js";
 import { HttpError } from "../middleware/errors.js";
 import {
@@ -6,6 +6,29 @@ import {
   createOrderSchema,
 } from "../validation.js";
 import { getRoutePrice } from "./pricing.js";
+
+export function assertCompanyCanCreateOrder(permission: CompanyPermission) {
+  if (permission === "RESTRICTED") {
+    throw new HttpError(403, "Seu perfil não tem permissão para registrar pedidos.");
+  }
+}
+
+export function summarizeOrderStatuses(
+  rows: Array<{ status: OrderStatus; count: number }>,
+): Record<OrderStatus, number> {
+  const counts: Record<OrderStatus, number> = {
+    PENDING: 0,
+    FINALIZED: 0,
+    CONFIRMED: 0,
+    ASSIGNED: 0,
+    PICKED_UP: 0,
+    IN_TRANSIT: 0,
+    DELIVERED: 0,
+    CANCELLED: 0,
+  };
+  for (const row of rows) counts[row.status] = row.count;
+  return counts;
+}
 
 export async function createOrder(input: unknown, createdById?: string, companyId?: string) {
   const data = createOrderSchema.parse(input);

@@ -101,6 +101,17 @@ const EMPTY_SUMMARY: ApiDashboardSummary = {
 
   allTime: { orders: 0, total: 0, average: 0 },
 
+  statusCounts: {
+    PENDING: 0,
+    FINALIZED: 0,
+    CONFIRMED: 0,
+    ASSIGNED: 0,
+    PICKED_UP: 0,
+    IN_TRANSIT: 0,
+    DELIVERED: 0,
+    CANCELLED: 0,
+  },
+
   timezone: "America/Sao_Paulo",
 }
 
@@ -1101,6 +1112,38 @@ export default function AdminDashboard({
                   detail="Por entrega registrada"
                   icon={ChartNoAxesCombined}
                   tone="bg-[#f1edff] text-[#785cc2]"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+                <MetricCard
+                  label="Entregas em andamento"
+                  value={(
+                    summary.statusCounts.PENDING +
+                    summary.statusCounts.CONFIRMED +
+                    summary.statusCounts.ASSIGNED +
+                    summary.statusCounts.PICKED_UP +
+                    summary.statusCounts.IN_TRANSIT
+                  ).toLocaleString("pt-BR")}
+                  detail="Todas as empresas"
+                  icon={Activity}
+                  tone="bg-[#edf5ff] text-[#3778c2]"
+                />
+                <MetricCard
+                  label="Entregas concluídas"
+                  value={(
+                    summary.statusCounts.FINALIZED +
+                    summary.statusCounts.DELIVERED
+                  ).toLocaleString("pt-BR")}
+                  detail="Finalizadas ou entregues"
+                  icon={Package}
+                  tone="bg-[#eff9f2] text-[#3d9a62]"
+                />
+                <MetricCard
+                  label="Entregas canceladas"
+                  value={summary.statusCounts.CANCELLED.toLocaleString("pt-BR")}
+                  detail="Todas as empresas"
+                  icon={Package}
+                  tone="bg-[#fff3e9] text-[#e97820]"
                 />
               </div>
               <DashboardChartsPanel

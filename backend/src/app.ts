@@ -7,7 +7,7 @@ import { createAccessToken, hashPassword, publicUser, verifyPassword } from "./a
 import { bearerAuth, requireAuth } from "./middleware/auth.js";
 import { developmentActor } from "./middleware/placeholderAuth.js";
 import { errorHandler, HttpError, notFound } from "./middleware/errors.js";
-import { createOrder, getPublicOrder } from "./services/orders.js";
+import { assertCompanyCanCreateOrder, createOrder, getPublicOrder, summarizeOrderStatuses } from "./services/orders.js";
 import { notifyNewOrder } from "./services/whatsapp.js";
 import { processIncomingWebhook, verifyWebhookSignature } from "./services/whatsappWebhook.js";
 import { getRoutePrice } from "./services/pricing.js";
@@ -166,6 +166,20 @@ api.post("/auth/change-password", requireAuth, async (req, res, next) => {
 api.post("/orders", requireCurrentUserIfAuthenticated, async (req, res, next) => {
   try {
     const companyId = req.actor?.role === "COMPANY" ? req.actor.companyId : undefined;
+    if (req.actor?.role === "COMPANY") {
+      if (!companyId) throw new HttpError(403, "Empresa não identificada.");
+      const companyUser = await prisma.user.findFirst({
+        where: {
+          id: req.actor.id,
+          companyId,
+          isActive: true,
+          role: { name: "COMPANY" },
+        },
+        select: { companyPermission: true },
+      });
+      if (!companyUser) throw new HttpError(401, "Sessão empresarial inválida.");
+      assertCompanyCanCreateOrder(companyUser.companyPermission);
+    }
     const order = await createOrder(req.body, req.actor?.id, companyId);
     let whatsapp: { status: "sent" | "pending" | "failed" | "not_configured" | "unknown"; fallbackUrl?: string };
     try {
@@ -288,8 +302,24 @@ api.get("/dashboard/summary", requireAuth, async (req, res, next) => {
       });
       return { orders: result._count._all, total: Number(result._sum.price ?? 0), average: Number(result._avg.price ?? 0) };
     };
-    const [today, week, month, allTime] = await Promise.all([aggregateFor(dayStart), aggregateFor(weekStart), aggregateFor(monthStart), aggregateFor()]);
-    res.json({ summary: { today, week, month, allTime, timezone: "America/Sao_Paulo" } });
+    const [today, week, month, allTime, statusRows] = await Promise.all([
+      aggregateFor(dayStart),
+      aggregateFor(weekStart),
+      aggregateFor(monthStart),
+      aggregateFor(),
+      prisma.order.groupBy({
+        by: ["status"],
+        where: scope,
+        _count: { _all: true },
+      }),
+    ]);
+    const statusCounts = summarizeOrderStatuses(
+      statusRows.map(({ status, _count }) => ({
+        status,
+        count: _count._all,
+      })),
+    );
+    res.json({ summary: { today, week, month, allTime, statusCounts, timezone: "America/Sao_Paulo" } });
   } catch (e) { next(e); }
 });
 api.get("/dashboard/charts", requireAuth, async (req, res, next) => {
