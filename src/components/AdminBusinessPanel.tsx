@@ -11,7 +11,17 @@ import {
 
 import type { InputHTMLAttributes } from "react"
 
-import { Activity, Copy, KeyRound, Pencil, Plus, RefreshCw, ShieldCheck } from "lucide-react"
+import {
+  Activity,
+  Copy,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Pencil,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+} from "lucide-react"
 
 import {
   createAdminFinancialEntry,
@@ -301,6 +311,7 @@ export default function AdminBusinessPanel({
     password: "",
     role: "ADMIN" as ApiSystemUser["role"],
   })
+  const [showUserPassword, setShowUserPassword] = useState(false)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -614,6 +625,7 @@ export default function AdminBusinessPanel({
       `${role === "COURIER" ? "Motoboy" : role === "COMPANY" ? "Conta empresarial" : "Administrador"} criado.`,
     ).then((created) => {
       if (created) {
+        setShowUserPassword(false)
         setUserForm({
           name: "",
           email: "",
@@ -1726,16 +1738,32 @@ export default function AdminBusinessPanel({
                   setUserForm({ ...userForm, phone: event.target.value })
                 }
               />
-              <Input
-                label={userForm.role === "COMPANY" ? "Senha inicial" : "Senha inicial (mínimo 12 caracteres)"}
-                type="password"
-                minLength={userForm.role === "COMPANY" ? undefined : 12}
-                required
-                value={userForm.password}
-                onChange={(event) =>
-                  setUserForm({ ...userForm, password: event.target.value })
-                }
-              />
+              <label className="block text-xs font-semibold text-[#64748b]">
+                {userForm.role === "COMPANY"
+                  ? "Senha inicial"
+                  : "Senha inicial (mínimo 12 caracteres)"}
+                <span className="relative mt-1 block">
+                  <input
+                    type={showUserPassword ? "text" : "password"}
+                    minLength={userForm.role === "COMPANY" ? undefined : 12}
+                    required
+                    value={userForm.password}
+                    onChange={(event) =>
+                      setUserForm({ ...userForm, password: event.target.value })
+                    }
+                    className="h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 pr-10 text-sm font-normal text-[#102b55] outline-none focus:border-[#f47b20]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowUserPassword((visible) => !visible)}
+                    aria-label={showUserPassword ? "Ocultar senha" : "Ver senha"}
+                    title={showUserPassword ? "Ocultar senha" : "Ver senha"}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-[#64748b]"
+                  >
+                    {showUserPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </span>
+              </label>
               <label className="block text-xs font-semibold text-[#64748b]">
                 Perfil
                 <select
