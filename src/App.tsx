@@ -119,6 +119,8 @@ export default function App() {
             onGoToLogin={() => setView('login')}
             token={session?.token}
             companyOrderMode={session?.user.role === 'COMPANY'}
+            requesterName={session?.user.name}
+            requesterPhone={session?.user.phone}
             onGoToDashboard={session ? () => setView(viewForRole(session.user.role)) : undefined}
           />
         )}

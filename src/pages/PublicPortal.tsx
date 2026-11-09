@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
-import { ArrowLeft, ArrowRight, Building2, Check, ChevronRight, Home, MapPin, MessageCircle, Navigation, Package, Pencil, Phone, User, type LucideIcon } from 'lucide-react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { ArrowLeft, ArrowRight, Building2, Check, ChevronRight, Home, MapPin, MessageCircle, Navigation, Package, Pencil, Phone, Search, User, type LucideIcon } from 'lucide-react'
 import Logo from '../components/Logo'
 import { emptyAddress as newStructuredAddress, geocodeAddress, isValidOptionalCep, lookupCep } from '../services/address'
 import { createPublicOrder, formatOrderPrice, getCompanyOrganization, getPublicSettings, getRoutePrice, searchCompanyPickupAddresses, type ApiDeliveryPrice, type ApiOrganization, type ApiPickupAddressSuggestion } from '../services/api'
@@ -12,6 +12,8 @@ interface PublicPortalProps {
   onGoToLogin: () => void
   token?: string
   companyOrderMode?: boolean
+  requesterName?: string
+  requesterPhone?: string | null
   onGoToDashboard?: () => void
 }
 
@@ -224,7 +226,14 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-export default function PublicPortal({ onGoToLogin, token, companyOrderMode = false, onGoToDashboard }: PublicPortalProps) {
+export default function PublicPortal({
+  onGoToLogin,
+  token,
+  companyOrderMode = false,
+  requesterName,
+  requesterPhone,
+  onGoToDashboard,
+}: PublicPortalProps) {
   const [step, setStep] = useState(1)
   const [pickup, setPickup] = useState<AddressForm>(emptyAddress())
   const [dropoff, setDropoff] = useState<AddressForm>(emptyAddress())
@@ -249,7 +258,10 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
   const [addressSearchError, setAddressSearchError] = useState('')
   const [selectedPickupSuggestion, setSelectedPickupSuggestion] = useState<ApiPickupAddressSuggestion | null>(null)
   const [selectedDeliverySuggestion, setSelectedDeliverySuggestion] = useState<ApiPickupAddressSuggestion | null>(null)
-  const [manualAddressStep, setManualAddressStep] = useState<number | null>(companyOrderMode ? null : 1)
+  const [manualAddressStep, setManualAddressStep] = useState<number | null>(null)
+  const [editingRequester, setEditingRequester] = useState(!requesterName || !requesterPhone)
+  const skipPickupCepLookup = useRef(false)
+  const skipDeliveryCepLookup = useRef(false)
   const [costCenterId, setCostCenterId] = useState('')
   const [coordinates, setCoordinates] = useState<{ pickup?: { latitude: number; longitude: number }; delivery?: { latitude: number; longitude: number } }>({})
   const [cepLookup, setCepLookup] = useState<{ pickupLoading: boolean; deliveryLoading: boolean; pickupError: string; deliveryError: string }>({
@@ -258,10 +270,15 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
     pickupError: '',
     deliveryError: '',
   })
+  const defaultRequesterName = requesterName && organization?.company.name &&
+    requesterName.trim().localeCompare(organization.company.name.trim(), undefined, { sensitivity: 'base' }) !== 0
+    ? requesterName
+    : ''
 
   const setPickupField = (field: keyof AddressForm) => (v: string) => {
     const addressField = field !== 'name' && field !== 'phone'
     if (addressField) {
+      if (pickupAddressSource && field !== 'cep') skipPickupCepLookup.current = true
       setPickupAddressSource(null)
       setSelectedPickupSuggestion(null)
       setCoordinates(current => ({ ...current, pickup: undefined }))
@@ -273,6 +290,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
   }
   const setDropoffField = (field: keyof AddressForm) => (v: string) => {
     if (field !== 'name' && field !== 'phone') {
+      if (deliveryAddressSource && field !== 'cep') skipDeliveryCepLookup.current = true
       setDeliveryAddressSource(null)
       setSelectedDeliverySuggestion(null)
       setCoordinates(current => ({ ...current, delivery: undefined }))
@@ -303,7 +321,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
     } else {
       setDeliveryAddressSource(source)
       setSelectedDeliverySuggestion(suggestion)
-      setDropoff(current => ({ ...current, ...address, name: current.name || suggestion.name }))
+      setDropoff(current => ({ ...current, ...address }))
       setCoordinates(current => ({ ...current, delivery: suggestion.address.coordinates }))
     }
     setManualAddressStep(null)
@@ -314,15 +332,6 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
 
   const editAddress = (targetStep: 1 | 2) => {
     setManualAddressStep(targetStep)
-    if (targetStep === 1) {
-      setPickupAddressSource(null)
-      setSelectedPickupSuggestion(null)
-      setCoordinates(current => ({ ...current, pickup: undefined }))
-    } else {
-      setDeliveryAddressSource(null)
-      setSelectedDeliverySuggestion(null)
-      setCoordinates(current => ({ ...current, delivery: undefined }))
-    }
   }
 
   const step1Valid = Boolean(pickup.name.trim() && isValidPhone(pickup.phone) && isValidOptionalCep(pickup.cep) && pickup.street.trim() && pickup.number.trim() && pickup.neighborhood.trim() && pickup.city.trim())
@@ -342,6 +351,11 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
 
   useEffect(() => {
     if (pickupAddressSource) {
+      setCepLookup(current => ({ ...current, pickupLoading: false, pickupError: '' }))
+      return
+    }
+    if (skipPickupCepLookup.current) {
+      skipPickupCepLookup.current = false
       setCepLookup(current => ({ ...current, pickupLoading: false, pickupError: '' }))
       return
     }
@@ -378,6 +392,11 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
       setCepLookup(current => ({ ...current, deliveryLoading: false, deliveryError: '' }))
       return
     }
+    if (skipDeliveryCepLookup.current) {
+      skipDeliveryCepLookup.current = false
+      setCepLookup(current => ({ ...current, deliveryLoading: false, deliveryError: '' }))
+      return
+    }
     if (!dropoff.cep || !/^\d{8}$/.test(dropoff.cep.replace(/\D/g, ''))) {
       setCepLookup(current => ({ ...current, deliveryLoading: false, deliveryError: '' }))
       return
@@ -408,10 +427,28 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
 
   useEffect(() => {
     if (!companyOrderMode || !token) return
+    let active = true
     getCompanyOrganization(token)
-      .then(result => setOrganization(result.organization))
-      .catch(error => setOrganizationError(error instanceof Error ? error.message : 'Não foi possível carregar filiais e centros de custo.'))
-  }, [companyOrderMode, token])
+      .then(result => {
+        if (!active) return
+        setOrganization(result.organization)
+        const accountNameMatchesCompany = requesterName?.trim().localeCompare(
+          result.organization.company.name.trim(),
+          undefined,
+          { sensitivity: 'base' },
+        ) === 0
+        if (accountNameMatchesCompany) setEditingRequester(true)
+        setPickup(current => ({
+          ...current,
+          name: current.name || (accountNameMatchesCompany ? '' : requesterName || ''),
+          phone: current.phone || (requesterPhone ? formatPhone(requesterPhone) : ''),
+        }))
+      })
+      .catch(error => {
+        if (active) setOrganizationError(error instanceof Error ? error.message : 'Não foi possível carregar filiais e centros de custo.')
+      })
+    return () => { active = false }
+  }, [companyOrderMode, requesterName, requesterPhone, token])
 
   useEffect(() => {
     const query = addressSearch.trim()
@@ -487,10 +524,10 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
     let active = true
     const timer = setTimeout(async () => {
       const [pickupPoint, deliveryPoint] = await Promise.all([
-        pickupAddressSource
+        coordinates.pickup
           ? coordinates.pickup
           : pickup.street && pickup.neighborhood ? geocodeAddress({ ...newStructuredAddress(), rua: pickup.street, numero: pickup.number, bairro: pickup.neighborhood }) : undefined,
-        deliveryAddressSource
+        coordinates.delivery
           ? coordinates.delivery
           : dropoff.street && dropoff.neighborhood ? geocodeAddress({ ...newStructuredAddress(), rua: dropoff.street, numero: dropoff.number, bairro: dropoff.neighborhood }) : undefined,
       ])
@@ -579,7 +616,12 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
             onClick={() => {
               setSubmitted(false)
               setStep(1)
-              setPickup({ ...emptyAddress(), city: pickup.city })
+              setPickup({
+                ...emptyAddress(),
+                name: defaultRequesterName,
+                phone: requesterPhone ? formatPhone(requesterPhone) : '',
+                city: pickup.city,
+              })
               setDropoff({ ...emptyAddress(), city: dropoff.city })
               setObservations('')
               setOrderResult(null)
@@ -591,7 +633,8 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
               setAddressSearchError('')
               setAddressSearchLoading(false)
               setAddressSuggestions([])
-              setManualAddressStep(companyOrderMode ? null : 1)
+              setManualAddressStep(null)
+              setEditingRequester(!requesterName || !requesterPhone)
               setCoordinates({})
             }}
             className="w-full min-h-12 rounded-xl bg-[#0f3266] text-white text-sm font-700 hover:bg-[#17447f] transition-colors"
@@ -667,7 +710,9 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                   </div>
                   <div>
                     <h1 className="text-2xl font-800 text-[#0c225a]">De onde vamos buscar?</h1>
-                    <p className="mt-1 text-sm text-[#718096]">Informe o local de retirada da sua entrega.</p>
+                    <p className="mt-1 text-sm text-[#718096]">
+                      {companyOrderMode ? 'Pesquise um cliente cadastrado ou informe um novo endereço.' : 'Informe um novo endereço de retirada.'}
+                    </p>
                   </div>
                 </div>
 
@@ -680,14 +725,15 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                       id="pickup-address-search"
                       value={addressSearch}
                       onChange={event => setAddressSearch(event.target.value)}
-                      placeholder="Digite o nome do cliente ou endereço..."
+                      placeholder="Digite o nome do cliente ou estabelecimento..."
                       autoComplete="off"
                       maxLength={80}
                       aria-autocomplete="list"
                       aria-expanded={addressSuggestions.length > 0}
                       aria-controls="pickup-address-suggestions"
-                      className="mt-1 h-11 w-full rounded-xl border border-[#d8e1eb] bg-white px-4 text-sm text-[#102a43] placeholder:text-[#8a9aab] focus:border-[#39b5ee] focus:outline-none focus:ring-4 focus:ring-[#39b5ee]/10"
+                      className="mt-1 h-11 w-full rounded-xl border border-[#d8e1eb] bg-white pl-10 pr-4 text-sm text-[#102a43] placeholder:text-[#8a9aab] focus:border-[#39b5ee] focus:outline-none focus:ring-4 focus:ring-[#39b5ee]/10"
                     />
+                    <Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-[2.4rem] text-[#64748b]"/>
                     {addressSearchLoading && <p className="mt-1 text-xs text-[#718096]">Buscando endereços…</p>}
                     {addressSearchError && <p role="alert" className="mt-1 text-xs text-red-600">{addressSearchError}</p>}
                     {!addressSearchLoading && !addressSearchError && addressSearch.trim().length >= 2 && addressSuggestions.length === 0 && (
@@ -703,7 +749,10 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                               className="w-full px-3 py-2.5 text-left hover:bg-[#f4f8fc] focus:bg-[#f4f8fc] focus:outline-none"
                             >
                               <span className="block text-xs font-semibold text-[#0f3266]">
-                                {suggestion.name}{suggestion.unitName ? ` — ${suggestion.unitName}` : ''}
+                                {suggestion.name}
+                              </span>
+                              <span className="mt-0.5 block text-[11px] font-medium text-[#52657f]">
+                                {[suggestion.unitName, suggestion.address.cidade].filter(Boolean).join(' · ')}
                               </span>
                               <span className="mt-0.5 block text-[10px] text-[#64748b]">
                                 {suggestion.address.rua}, {suggestion.address.numero} · {suggestion.address.bairro}
@@ -722,12 +771,13 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                       <div className="flex min-w-0 gap-3">
                         <MapPin size={18} className="mt-0.5 shrink-0 text-[#f47b20]"/>
                         <div>
-                          <p className="text-sm font-bold text-[#0f3266]">{selectedPickupSuggestion.name}{selectedPickupSuggestion.unitName ? ` · ${selectedPickupSuggestion.unitName}` : ''}</p>
+                          <p className="text-sm font-bold text-[#0f3266]">{selectedPickupSuggestion.name}</p>
+                          {selectedPickupSuggestion.unitName && <p className="mt-0.5 text-xs font-medium text-[#52657f]">{selectedPickupSuggestion.unitName}{selectedPickupSuggestion.address.cidade ? ` · ${selectedPickupSuggestion.address.cidade}` : ''}</p>}
                           <p className="mt-1 text-xs leading-relaxed text-[#64748b]">{pickup.street}, {pickup.number}{pickup.complement ? `, ${pickup.complement}` : ''} · {pickup.neighborhood}, {pickup.city}</p>
                         </div>
                       </div>
                       <button type="button" onClick={() => editAddress(1)} className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[#0f3266] hover:underline">
-                        <Pencil size={13}/> Alterar endereço
+                        <Pencil size={13}/> Conferir ou editar endereço
                       </button>
                     </div>
                   </div>
@@ -737,13 +787,33 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                   </div>
                 ) : (
                   <button type="button" onClick={() => setManualAddressStep(1)} className="text-left text-xs font-semibold text-[#0f3266] underline decoration-[#bfd1e5] underline-offset-4">
-                    Não encontrou? Informar endereço manualmente.
+                    {companyOrderMode ? 'Não encontrou seu endereço? Informar manualmente.' : 'Informar endereço de retirada manualmente.'}
                   </button>
                 )}
 
-                <div className="grid gap-3 border-t border-[#f1f5f9] pt-5 sm:grid-cols-2">
-                  <InputField label="Nome do solicitante" value={pickup.name} onChange={setPickupField('name')} placeholder="Seu nome" icon={User} required/>
-                  <InputField label="Telefone" value={pickup.phone} onChange={value => setPickupField('phone')(formatPhone(value))} placeholder="(32) 99999-0000" icon={Phone} inputMode="tel" required error={pickup.phone && !isValidPhone(pickup.phone) ? 'Informe um telefone com DDD.' : undefined}/>
+                <div className="rounded-2xl border border-[#e2eaf4] bg-[#f3f7fd] p-3.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#dce9fb] text-[#0f3266]"><User size={17}/></div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-[#0c225a]">Dados do solicitante</p>
+                        {editingRequester ? (
+                          <p className="mt-0.5 text-[11px] text-[#64748b]">Nome e telefone para contato.</p>
+                        ) : (
+                          <p className="mt-0.5 truncate text-[11px] text-[#52657f]">{pickup.name} · {pickup.phone}</p>
+                        )}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setEditingRequester(editing => !editing)} aria-label={editingRequester ? 'Concluir edição dos dados do solicitante' : 'Editar dados do solicitante'} className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[#0f3266] hover:underline">
+                      <Pencil size={13}/>{editingRequester ? 'Concluir' : 'Editar'}
+                    </button>
+                  </div>
+                  {editingRequester && (
+                    <div className="mt-3 grid gap-3 border-t border-[#dce5f0] pt-3 sm:grid-cols-2">
+                      <InputField label="Nome do solicitante" value={pickup.name} onChange={setPickupField('name')} placeholder="Seu nome" icon={User} required/>
+                      <InputField label="Telefone" value={pickup.phone} onChange={value => setPickupField('phone')(formatPhone(value))} placeholder="(32) 99999-0000" icon={Phone} inputMode="tel" required error={pickup.phone && !isValidPhone(pickup.phone) ? 'Informe um telefone com DDD.' : undefined}/>
+                    </div>
+                  )}
                 </div>
 
                 <button
@@ -769,7 +839,9 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                   </div>
                   <div>
                     <h1 className="text-2xl font-800 text-[#0c225a]">Para onde vamos entregar?</h1>
-                    <p className="mt-1 text-sm text-[#718096]">Informe o endereço de destino.</p>
+                    <p className="mt-1 text-sm text-[#718096]">
+                      {companyOrderMode ? 'Pesquise um endereço cadastrado ou informe um novo endereço.' : 'Informe o endereço de destino.'}
+                    </p>
                   </div>
                 </div>
 
@@ -780,14 +852,15 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                       id="delivery-address-search"
                       value={addressSearch}
                       onChange={event => setAddressSearch(event.target.value)}
-                      placeholder="Digite o nome do cliente ou endereço..."
+                      placeholder="Digite o nome do destinatário ou endereço..."
                       autoComplete="off"
                       maxLength={80}
                       aria-autocomplete="list"
                       aria-expanded={addressSuggestions.length > 0}
                       aria-controls="delivery-address-suggestions"
-                      className="h-12 w-full rounded-xl border border-[#d8e1eb] bg-white px-4 text-sm text-[#102a43] placeholder:text-[#8a9aab] focus:border-[#39b5ee] focus:outline-none focus:ring-4 focus:ring-[#39b5ee]/10"
+                      className="h-12 w-full rounded-xl border border-[#d8e1eb] bg-white pl-10 pr-4 text-sm text-[#102a43] placeholder:text-[#8a9aab] focus:border-[#39b5ee] focus:outline-none focus:ring-4 focus:ring-[#39b5ee]/10"
                     />
+                    <Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-[2.35rem] text-[#64748b]"/>
                     {addressSearchLoading && <p className="mt-2 text-xs text-[#718096]">Buscando endereços…</p>}
                     {addressSearchError && <p role="alert" className="mt-2 text-xs text-red-600">{addressSearchError}</p>}
                     {!addressSearchLoading && !addressSearchError && addressSearch.trim().length >= 2 && addressSuggestions.length === 0 && step === 2 && (
@@ -798,8 +871,9 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                         {addressSuggestions.map(suggestion => (
                           <li key={`${suggestion.source}:${suggestion.id}`}>
                             <button type="button" onClick={() => chooseAddressSuggestion(suggestion)} className="w-full px-4 py-3 text-left transition-colors hover:bg-[#f4f8fc] focus:bg-[#f4f8fc] focus:outline-none">
-                              <span className="block text-sm font-bold text-[#0f3266]">{suggestion.name}{suggestion.unitName ? ` · ${suggestion.unitName}` : ''}</span>
-                              <span className="mt-1 block text-xs text-[#64748b]">{suggestion.address.rua}, {suggestion.address.numero} · {suggestion.address.bairro}{suggestion.address.cidade ? `, ${suggestion.address.cidade}` : ''}</span>
+                              <span className="block text-sm font-bold text-[#0f3266]">{suggestion.name}</span>
+                              <span className="mt-0.5 block text-xs font-medium text-[#52657f]">{[suggestion.unitName, suggestion.address.cidade].filter(Boolean).join(' · ')}</span>
+                              <span className="mt-1 block text-[11px] text-[#64748b]">{suggestion.address.rua}, {suggestion.address.numero} · {suggestion.address.bairro}</span>
                             </button>
                           </li>
                         ))}
@@ -814,12 +888,13 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                       <div className="flex min-w-0 gap-3">
                         <MapPin size={18} className="mt-0.5 shrink-0 text-[#f47b20]"/>
                         <div>
-                          <p className="text-sm font-bold text-[#0f3266]">{selectedDeliverySuggestion.name}{selectedDeliverySuggestion.unitName ? ` · ${selectedDeliverySuggestion.unitName}` : ''}</p>
+                          <p className="text-sm font-bold text-[#0f3266]">{selectedDeliverySuggestion.name}</p>
+                          {selectedDeliverySuggestion.unitName && <p className="mt-0.5 text-xs font-medium text-[#52657f]">{selectedDeliverySuggestion.unitName}{selectedDeliverySuggestion.address.cidade ? ` · ${selectedDeliverySuggestion.address.cidade}` : ''}</p>}
                           <p className="mt-1 text-xs leading-relaxed text-[#64748b]">{dropoff.street}, {dropoff.number}{dropoff.complement ? `, ${dropoff.complement}` : ''} · {dropoff.neighborhood}, {dropoff.city}</p>
                         </div>
                       </div>
                       <button type="button" onClick={() => editAddress(2)} className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[#0f3266] hover:underline">
-                        <Pencil size={13}/> Alterar endereço
+                        <Pencil size={13}/> Conferir ou editar endereço
                       </button>
                     </div>
                   </div>
@@ -829,7 +904,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                   </div>
                 ) : (
                   <button type="button" onClick={() => setManualAddressStep(2)} className="text-left text-xs font-semibold text-[#0f3266] underline decoration-[#bfd1e5] underline-offset-4">
-                    Não encontrou? Informar endereço manualmente.
+                    {companyOrderMode ? 'Não encontrou o destinatário? Informar endereço manualmente.' : 'Informar endereço de destino manualmente.'}
                   </button>
                 )}
 
