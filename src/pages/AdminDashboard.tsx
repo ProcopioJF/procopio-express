@@ -31,6 +31,8 @@ import IntelligencePanel from "../components/IntelligencePanel"
 
 import AdminBusinessPanel from "../components/AdminBusinessPanel"
 
+import AdminCompanyOrganizationPanel from "../components/AdminCompanyOrganizationPanel"
+
 import AdminPricingPanel from "../components/AdminPricingPanel"
 
 import ChangePasswordPanel from "../components/ChangePasswordPanel"
@@ -533,6 +535,8 @@ export default function AdminDashboard({
   const orderRequestIdRef = useRef(0)
 
   const [editingCompanyId, setEditingCompanyId] = useState("")
+
+  const [organizationCompanyId, setOrganizationCompanyId] = useState("")
 
   const [companyEditForm, setCompanyEditForm] = useState({
     name: "",
@@ -1443,22 +1447,34 @@ export default function AdminDashboard({
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            aria-label={`Editar cadastro de ${company.name}`}
-                            onClick={() => {
-                              setEditingCompanyId(company.id)
-                              setCompanyEditForm({
-                                name: company.name,
-                                document: company.document ?? "",
-                                email: company.email ?? "",
-                                phone: company.phone ?? "",
-                              })
-                            }}
-                            className="grid h-8 w-8 place-items-center rounded-lg border border-[#e8edf4] text-[#52657f] hover:border-[#f47b20] hover:text-[#c76216]"
-                          >
-                            <Pencil size={14} />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              aria-label={`Gerenciar usuários e filiais de ${company.name}`}
+                              onClick={() => setOrganizationCompanyId(
+                                organizationCompanyId === company.id ? "" : company.id,
+                              )}
+                              className="grid h-8 w-8 place-items-center rounded-lg border border-[#e8edf4] text-[#52657f] hover:border-[#f47b20] hover:text-[#c76216]"
+                            >
+                              <Building2 size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Editar cadastro de ${company.name}`}
+                              onClick={() => {
+                                setEditingCompanyId(company.id)
+                                setCompanyEditForm({
+                                  name: company.name,
+                                  document: company.document ?? "",
+                                  email: company.email ?? "",
+                                  phone: company.phone ?? "",
+                                })
+                              }}
+                              className="grid h-8 w-8 place-items-center rounded-lg border border-[#e8edf4] text-[#52657f] hover:border-[#f47b20] hover:text-[#c76216]"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1470,6 +1486,14 @@ export default function AdminDashboard({
                   </p>
                 )}
               </div>
+              {organizationCompanyId && companies.some((company) => company.id === organizationCompanyId) && (
+                <AdminCompanyOrganizationPanel
+                  token={token}
+                  companyId={organizationCompanyId}
+                  companyName={companies.find((company) => company.id === organizationCompanyId)?.name ?? ""}
+                  onClose={() => setOrganizationCompanyId("")}
+                />
+              )}
             </div>
           )}
 

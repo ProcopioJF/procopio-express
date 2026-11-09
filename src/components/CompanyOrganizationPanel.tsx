@@ -1,116 +1,69 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useState } from "react"
 
-import type { InputHTMLAttributes } from "react"
-
-import { Plus, RefreshCw } from "lucide-react"
+import { Building2, RefreshCw, Users } from "lucide-react"
 
 import {
-  changePasswordRequest,
-  createCompanyBranch,
-  createCompanyCostCenter,
-  createCompanyMember,
   getCompanyOrganization,
-  updateCompanyBranch,
-  updateCompanyCostCenter,
-  updateCompanyMember,
-  type ApiBranch,
   type ApiCompanySettings,
-  type ApiCostCenter,
   type ApiOrganization,
   type ApiUser,
 } from "../services/api"
 
-type Tab = "profile" | "users" | "cost-centers" | "branches"
+type Tab = "company" | "users" | "branches"
 
-type InputProps = InputHTMLAttributes<HTMLInputElement> & { label: string }
-
-const emptyBranchForm = () => ({
-  name: "",
-  phone: "",
-  rua: "",
-  numero: "",
-  bairro: "",
-  cidade: "",
-  estado: "",
-  cep: "",
-  complemento: "",
-})
-
-function Input({ label, ...props }: InputProps) {
+function InfoCard({ label, value }: { label: string; value?: string | null }) {
   return (
-    <label className="block text-xs font-semibold text-[#718096]">
-      {label}
-      <input
-        {...props}
-        className={`mt-1 block h-10 w-full rounded-xl border border-[#e2e8f4] bg-[#fbfcfe] px-3 text-sm text-[#102b55] outline-none focus:border-[#f47b20] ${props.className ?? ""}`}
-      />
-    </label>
+    <div className="rounded-xl bg-[#f8fafc] p-3">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-[#8795a8]">
+        {label}
+      </p>
+      <p className="mt-1 break-words text-sm font-semibold text-[#102b55]">
+        {value?.trim() || "Não informado"}
+      </p>
+    </div>
   )
+}
+
+function branchAddress(branch: ApiOrganization["branches"][number]) {
+  const address = branch.address
+  if (!address) return "Endereço não informado"
+  if (address.text?.trim()) return address.text
+  return [
+    [address.rua, address.numero].filter(Boolean).join(", "),
+    address.complemento,
+    address.bairro,
+    [address.cidade, address.estado].filter(Boolean).join(" - "),
+    address.cep ? `CEP ${address.cep}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ") || "Endereço não informado"
 }
 
 export default function CompanyOrganizationPanel({
   token,
-
   user,
-
   profile,
-
   onFeedback,
 }: {
   token: string
-
   user: ApiUser
-
   profile: ApiCompanySettings
-
   onFeedback: (error: string, notice?: string) => void
 }) {
-  const [tab, setTab] = useState<Tab>("profile")
-
+  const [tab, setTab] = useState<Tab>("company")
   const [organization, setOrganization] = useState<ApiOrganization | null>(null)
-
   const [loading, setLoading] = useState(true)
-
-  const [saving, setSaving] = useState(false)
-
-  const [showForm, setShowForm] = useState(false)
-  const [editingBranchId, setEditingBranchId] = useState("")
-
-  const [memberForm, setMemberForm] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    password: "",
-    companyPermission: "STANDARD" as Exclude<
-      NonNullable<ApiUser["companyPermission"]>,
-      "ADMIN"
-    >,
-  })
-
-  const [branchForm, setBranchForm] = useState(emptyBranchForm)
-
-  const [costCenterForm, setCostCenterForm] = useState({ name: "", code: "" })
-
-  const [passwordForm, setPasswordForm] = useState({
-    currentPassword: "",
-    newPassword: "",
-    confirmPassword: "",
-  })
-
-  const [showPasswordForm, setShowPasswordForm] = useState(false)
 
   const refresh = useCallback(async () => {
     setLoading(true)
-
     try {
       const result = await getCompanyOrganization(token)
-
       setOrganization(result.organization)
     } catch (cause) {
       onFeedback(
         cause instanceof Error
           ? cause.message
-          : "Não foi possível carregar a estrutura da empresa.",
+          : "Não foi possível carregar os dados da empresa.",
       )
     } finally {
       setLoading(false)
@@ -121,181 +74,40 @@ export default function CompanyOrganizationPanel({
     void refresh()
   }, [refresh])
 
-  const run = async (operation: () => Promise<unknown>, success: string) => {
-    setSaving(true)
-
-    onFeedback("")
-
-    try {
-      await operation()
-
-      await refresh()
-
-      setShowForm(false)
-
-      onFeedback("", success)
-      return true
-    } catch (cause) {
-      onFeedback(
-        cause instanceof Error
-          ? cause.message
-          : "Não foi possível salvar as alterações.",
-      )
-      return false
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const member = organization?.members.find((item) => item.id === user.id)
-
-  const canManage = member?.companyPermission === "ADMIN"
-
-  const submitMember = (event: FormEvent) => {
-    event.preventDefault()
-
-    void run(
-      () => createCompanyMember(token, memberForm),
-      "Usuário da empresa criado.",
-    )
-  }
-
-  const submitBranch = (event: FormEvent) => {
-    event.preventDefault()
-
-    const { name, phone, ...address } = branchForm
-    const branch = {
-      name,
-      phone,
-      address: {
-        ...address,
-        cep: address.cep.replace(/\D/g, "") || undefined,
-        complemento: address.complemento || undefined,
-      },
-    }
-    void run(
-      () => editingBranchId
-        ? updateCompanyBranch(token, editingBranchId, branch)
-        : createCompanyBranch(token, branch),
-      editingBranchId ? "Endereço atualizado." : "Endereço de coleta cadastrado.",
-    ).then(saved => {
-      if (!saved) return
-      setEditingBranchId("")
-      setBranchForm(emptyBranchForm())
-    })
-  }
-
-  const editBranch = (branch: ApiBranch) => {
-    setEditingBranchId(branch.id)
-    setBranchForm({
-      name: branch.name,
-      phone: branch.phone ?? "",
-      rua: branch.address?.rua ?? "",
-      numero: branch.address?.numero ?? "",
-      bairro: branch.address?.bairro ?? "",
-      cidade: branch.address?.cidade ?? "",
-      estado: branch.address?.estado ?? "",
-      cep: branch.address?.cep ?? "",
-      complemento: branch.address?.complemento ?? "",
-    })
-    setShowForm(true)
-  }
-
-  const submitCostCenter = (event: FormEvent) => {
-    event.preventDefault()
-
-    void run(
-      () => createCompanyCostCenter(token, costCenterForm),
-      "Centro de custo cadastrado.",
-    )
-  }
-
-  const submitPassword = (event: FormEvent) => {
-    event.preventDefault()
-
-    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      onFeedback("A confirmação da nova senha não corresponde.")
-
-      return
-    }
-
-    void run(
-      () =>
-        changePasswordRequest(
-          token,
-          passwordForm.currentPassword,
-          passwordForm.newPassword,
-        ),
-
-      "Senha atualizada.",
-    ).then((saved) => {
-      if (saved) {
-        setPasswordForm({
-          currentPassword: "",
-          newPassword: "",
-          confirmPassword: "",
-        })
-      }
-    })
-  }
-
   const tabs: Array<[Tab, string]> = [
-    ["profile", "Dados Cadastrais"],
-
+    ["company", "Dados da Empresa"],
     ["users", "Usuários"],
-
-    ["cost-centers", "Centros de Custo"],
-
     ["branches", "Filiais"],
   ]
-
-  const formClass =
-    "grid gap-3 rounded-2xl border border-[#e8edf4] bg-white p-4 md:grid-cols-2"
-
-  const buttonClass =
-    "flex h-10 items-center justify-center gap-2 rounded-xl bg-[#f47b20] px-4 text-xs font-bold text-white disabled:opacity-50"
+  const company = organization?.company
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-[#102b55]">
-            Perfil da empresa
+            Perfil da Empresa
           </h2>
           <p className="mt-1 text-xs text-[#718096]">
-            {organization?.company.name || profile.name || user.name}
-            {organization?.company.document
-              ? ` · ${organization.company.document}`
-              : ""}
+            Consulte os dados vinculados à sua organização.
           </p>
         </div>
-        <div className="flex gap-2">
-          {tab !== "profile" && canManage && (
-            <button
-              onClick={() => setShowForm((value) => !value)}
-              className="flex h-9 items-center gap-2 rounded-xl bg-[#f47b20] px-3 text-xs font-bold text-white"
-            >
-              <Plus size={14} /> Adicionar
-            </button>
-          )}
-          <button
-            onClick={() => void refresh()}
-            aria-label="Atualizar estrutura da empresa"
-            className="grid h-9 w-9 place-items-center rounded-xl border border-[#e8edf4] bg-white text-[#718096]"
-          >
-            <RefreshCw size={14} />
-          </button>
-        </div>
+        <button
+          onClick={() => void refresh()}
+          disabled={loading}
+          aria-label="Atualizar dados da empresa"
+          className="grid h-9 w-9 place-items-center rounded-xl border border-[#e8edf4] bg-white text-[#718096] disabled:opacity-50"
+        >
+          <RefreshCw size={14} />
+        </button>
       </div>
 
       <div className="flex flex-nowrap gap-2 overflow-x-auto border-b border-[#e8edf4]">
         {tabs.map(([id, label]) => (
           <button
             key={id}
-            onClick={() => {
-              setTab(id)
-              setShowForm(false)
-            }}
+            onClick={() => setTab(id)}
+            aria-current={tab === id ? "page" : undefined}
             className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-bold ${
               tab === id
                 ? "border-[#f47b20] text-[#c76216]"
@@ -306,573 +118,142 @@ export default function CompanyOrganizationPanel({
           </button>
         ))}
       </div>
+
       {loading && (
-        <p className="text-xs text-[#718096]">
-          Carregando perfil e estrutura...
-        </p>
+        <p className="text-xs text-[#718096]">Carregando dados da empresa…</p>
       )}
 
-      {tab === "profile" && (
-        <div className="grid gap-4 xl:grid-cols-2">
-          <div className="rounded-2xl border border-[#e8edf4] bg-white p-6">
-            <h3 className="font-bold text-[#102b55]">Dados cadastrais</h3>
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              {([
-                ["name", "Nome da empresa"],
-
-                ["document", "CNPJ ou documento"],
-
-                ["phone", "Telefone"],
-
-                ["email", "E-mail"],
-
-                ["address", "Endereço"],
-              ] as const).map(([key, label]) => (
-                <Input
-                  key={key}
-                  label={label}
-                  value={profile[key]}
-                  readOnly
-                />
-              ))}
-            </div>
-            <p className="mt-5 text-xs text-[#718096]">
-              Para solicitar alteração dos dados cadastrais, entre em contato
-              com a administração do Procópio Express.
-            </p>
-          </div>
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-[#e8edf4] bg-white p-5">
-              <h3 className="font-bold text-[#102b55]">Plano atual</h3>
-              {organization?.subscription ? (
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
-                  <span>{organization.subscription.plan.name}</span>
-                  <span
-                    className={`rounded-full px-2.5 py-1 text-xs font-bold ${
-                      organization.subscription.status === "ACTIVE"
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-amber-50 text-amber-700"
-                    }`}
-                  >
-                    {organization.subscription.status === "ACTIVE"
-                      ? "Ativo"
-                      : "Vencido"}
-                  </span>
-                </div>
-              ) : (
-                <p className="mt-3 text-sm text-[#718096]">
-                  Nenhuma assinatura ativa cadastrada.
-                </p>
-              )}
-            </div>
-            <div className="rounded-2xl border border-[#e8edf4] bg-white p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="font-bold text-[#102b55]">
-                    Segurança da conta
-                  </h3>
-                  <p className="mt-1 text-xs text-[#718096]">
-                    Atualize sua senha de acesso.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowPasswordForm((value) => !value)}
-                  className="rounded-lg border border-[#e8edf4] px-3 py-2 text-xs font-bold text-[#102b55]"
-                >
-                  {showPasswordForm ? "Cancelar" : "Alterar senha"}
-                </button>
-              </div>
-              {showPasswordForm && (
-                <form onSubmit={submitPassword} className="mt-4 space-y-3">
-                  <Input
-                    label="Senha atual"
-                    type="password"
-                    required
-                    value={passwordForm.currentPassword}
-                    onChange={(event) =>
-                      setPasswordForm({
-                        ...passwordForm,
-                        currentPassword: event.target.value,
-                      })
-                    }
-                  />
-                  <Input
-                    label="Nova senha (mínimo 12 caracteres)"
-                    type="password"
-                    minLength={12}
-                    required
-                    value={passwordForm.newPassword}
-                    onChange={(event) =>
-                      setPasswordForm({
-                        ...passwordForm,
-                        newPassword: event.target.value,
-                      })
-                    }
-                  />
-                  <Input
-                    label="Confirmar nova senha"
-                    type="password"
-                    minLength={12}
-                    required
-                    value={passwordForm.confirmPassword}
-                    onChange={(event) =>
-                      setPasswordForm({
-                        ...passwordForm,
-                        confirmPassword: event.target.value,
-                      })
-                    }
-                  />
-                  <button disabled={saving} className={buttonClass}>
-                    Atualizar senha
-                  </button>
-                </form>
-              )}
+      {tab === "company" && (
+        <section className="rounded-2xl border border-[#e8edf4] bg-white p-5 sm:p-6">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#fff3e9] text-[#e97820]">
+              <Building2 size={19} />
+            </span>
+            <div>
+              <h3 className="font-bold text-[#102b55]">
+                {company?.name || profile.name || user.name}
+              </h3>
+              <p className="text-xs text-[#8795a8]">
+                Informações cadastradas no Procópio Express
+              </p>
             </div>
           </div>
-        </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <InfoCard label="Nome da empresa" value={company?.name || profile.name} />
+            {company?.document && (
+              <InfoCard label="CNPJ ou documento" value={company.document} />
+            )}
+            <InfoCard label="Telefone" value={company?.phone || profile.phone} />
+            <InfoCard label="E-mail" value={company?.email || profile.email} />
+            <div className="sm:col-span-2">
+              <InfoCard
+                label="Endereço"
+                value={company?.address || profile.address}
+              />
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-[#718096]">
+            Para solicitar alterações cadastrais, entre em contato com a
+            administração do Procópio Express.
+          </p>
+        </section>
       )}
 
       {tab === "users" && (
-        <>
-          {!canManage && (
-            <p className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
-              Você tem acesso de consulta. Um administrador da empresa pode
-              gerenciar usuários e permissões.
-            </p>
-          )}
-          {showForm && canManage && (
-            <form onSubmit={submitMember} className={formClass}>
-              <Input
-                label="Nome"
-                required
-                value={memberForm.name}
-                onChange={(event) =>
-                  setMemberForm({ ...memberForm, name: event.target.value })
-                }
-              />
-              <Input
-                label="E-mail"
-                type="email"
-                required
-                value={memberForm.email}
-                onChange={(event) =>
-                  setMemberForm({ ...memberForm, email: event.target.value })
-                }
-              />
-              <Input
-                label="Telefone"
-                value={memberForm.phone}
-                onChange={(event) =>
-                  setMemberForm({ ...memberForm, phone: event.target.value })
-                }
-              />
-              <Input
-                label="Senha inicial (mínimo 12 caracteres)"
-                type="password"
-                minLength={12}
-                required
-                value={memberForm.password}
-                onChange={(event) =>
-                  setMemberForm({ ...memberForm, password: event.target.value })
-                }
-              />
-              <label className="block text-xs font-semibold text-[#64748b]">
-                Permissão
-                <select
-                  value={memberForm.companyPermission}
-                  onChange={(event) =>
-                    setMemberForm({
-                      ...memberForm,
-                      companyPermission: event.target
-                        .value as Exclude<
-                        NonNullable<ApiUser["companyPermission"]>,
-                        "ADMIN"
-                      >,
-                    })
-                  }
-                  className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-sm"
-                >
-                  <option value="STANDARD">Padrão</option>
-                  <option value="RESTRICTED">Restrito</option>
-                </select>
-              </label>
-              <div className="flex items-end">
-                <button disabled={saving} className={buttonClass}>
-                  Criar usuário
-                </button>
-              </div>
-              <p className="text-xs text-[#718096] md:col-span-2">
-                Compartilhe a senha inicial por canal seguro. O usuário poderá
-                alterá-la na própria conta.
+        <section className="overflow-hidden rounded-2xl border border-[#e8edf4] bg-white">
+          <div className="flex items-center gap-2 border-b border-[#eef2f6] p-4">
+            <Users size={16} className="text-[#e97820]" />
+            <div>
+              <h3 className="text-sm font-bold text-[#102b55]">Usuários</h3>
+              <p className="mt-0.5 text-xs text-[#8795a8]">
+                Contas vinculadas à organização.
               </p>
-            </form>
-          )}
-          <div className="overflow-x-auto rounded-2xl border border-[#e8edf4] bg-white">
-            <table className="w-full min-w-[720px] text-left text-xs">
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-left text-xs">
               <thead className="bg-[#f8fafc] text-[10px] uppercase tracking-wide text-[#7b8ba1]">
                 <tr>
-                  {["Nome", "E-mail", "Permissão", "Status", "Ações"].map(
-                    (label) => (
-                      <th key={label} className="px-4 py-3">
-                        {label}
-                      </th>
-                    ),
-                  )}
+                  {["Nome", "E-mail", "Permissão", "Status"].map((label) => (
+                    <th key={label} className="px-4 py-3">{label}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {organization?.members.map((item) => (
-                  <tr key={item.id} className="border-t border-[#f1f4f8]">
+                {organization?.members.map((member) => (
+                  <tr key={member.id} className="border-t border-[#f1f4f8]">
                     <td className="px-4 py-3 font-semibold text-[#102b55]">
-                      {item.name}
-                      {item.id === user.id && (
-                        <small className="ml-2 text-[#8795a8]">Você</small>
+                      {member.name}
+                      {member.id === user.id && (
+                        <span className="ml-2 text-[#8795a8]">Você</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">{item.email}</td>
-                    <td className="px-4 py-3">
-                      {item.companyPermission === "ADMIN"
+                    <td className="px-4 py-3 text-[#52657f]">{member.email}</td>
+                    <td className="px-4 py-3 text-[#52657f]">
+                      {member.companyPermission === "ADMIN"
                         ? "Administrador da empresa"
-                        : item.companyPermission === "RESTRICTED"
+                        : member.companyPermission === "RESTRICTED"
                           ? "Restrito"
                           : "Padrão"}
                     </td>
                     <td className="px-4 py-3">
-                      {item.isActive ? "Ativo" : "Inativo"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {canManage && item.id !== user.id && (
-                        <div className="flex gap-2">
-                          {item.companyPermission !== "ADMIN" && (
-                            <select
-                              disabled={saving || !item.isActive}
-                              value={item.companyPermission ?? "STANDARD"}
-                              aria-label={`Permissão de ${item.name}`}
-                              onChange={(event) =>
-                                void run(
-                                  () =>
-                                    updateCompanyMember(token, item.id, {
-                                      companyPermission: event.target
-                                        .value as Exclude<
-                                        NonNullable<ApiUser["companyPermission"]>,
-                                        "ADMIN"
-                                      >,
-                                    }),
-                                  "Permissão atualizada.",
-                                )
-                              }
-                              className="rounded-lg border border-[#e8edf4] px-2 py-1"
-                            >
-                              <option value="STANDARD">Padrão</option>
-                              <option value="RESTRICTED">Restrito</option>
-                            </select>
-                          )}
-                          <button
-                            disabled={saving}
-                            onClick={() =>
-                              void run(
-                                () =>
-                                  updateCompanyMember(token, item.id, {
-                                    isActive: !item.isActive,
-                                  }),
-                                item.isActive
-                                  ? "Usuário desativado."
-                                  : "Usuário ativado.",
-                              )
-                            }
-                            className="rounded-lg border border-[#e8edf4] px-2 py-1 font-semibold"
-                          >
-                            {item.isActive ? "Desativar" : "Ativar"}
-                          </button>
-                        </div>
-                      )}
+                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                        member.isActive
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-slate-100 text-slate-600"
+                      }`}>
+                        {member.isActive ? "Ativo" : "Inativo"}
+                      </span>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!organization?.members.length && (
+            {organization?.members.length === 0 && (
               <p className="p-8 text-center text-sm text-[#718096]">
-                Nenhum usuário cadastrado.
+                Nenhum usuário vinculado à empresa.
               </p>
             )}
           </div>
-        </>
+        </section>
       )}
 
       {tab === "branches" && (
-        <>
-          {!canManage && (
-            <p className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
-              Você tem acesso de consulta. Um administrador da empresa pode
-              gerenciar filiais.
-            </p>
-          )}
-          {showForm && canManage && (
-            <form onSubmit={submitBranch} className={formClass}>
-              <Input
-                label="Nome do endereço"
-                required
-                value={branchForm.name}
-                onChange={(event) =>
-                  setBranchForm({ ...branchForm, name: event.target.value })
-                }
-              />
-              <Input
-                label="Telefone"
-                value={branchForm.phone}
-                onChange={(event) =>
-                  setBranchForm({ ...branchForm, phone: event.target.value })
-                }
-              />
-              <Input
-                label="Rua / Avenida"
-                value={branchForm.rua}
-                onChange={(event) =>
-                  setBranchForm({ ...branchForm, rua: event.target.value })
-                }
-                required
-              />
-              <Input
-                label="Número"
-                value={branchForm.numero}
-                onChange={(event) =>
-                  setBranchForm({ ...branchForm, numero: event.target.value })
-                }
-                required
-              />
-              <Input
-                label="Bairro"
-                value={branchForm.bairro}
-                onChange={(event) =>
-                  setBranchForm({ ...branchForm, bairro: event.target.value })
-                }
-                required
-              />
-              <Input
-                label="Cidade"
-                value={branchForm.cidade}
-                onChange={(event) =>
-                  setBranchForm({ ...branchForm, cidade: event.target.value })
-                }
-                required
-              />
-              <Input
-                label="Estado"
-                value={branchForm.estado}
-                onChange={(event) =>
-                  setBranchForm({ ...branchForm, estado: event.target.value.toUpperCase().slice(0, 2) })
-                }
-                maxLength={2}
-                required
-              />
-              <Input
-                label="CEP (opcional)"
-                value={branchForm.cep}
-                onChange={(event) =>
-                  setBranchForm({
-                    ...branchForm,
-                    cep: event.target.value.replace(/\D/g, "").slice(0, 8),
-                  })
-                }
-              />
-              <Input
-                label="Complemento (opcional)"
-                value={branchForm.complemento}
-                onChange={(event) =>
-                  setBranchForm({ ...branchForm, complemento: event.target.value })
-                }
-              />
-              <div className="flex items-end">
-                <button disabled={saving} className={buttonClass}>
-                  {editingBranchId ? "Salvar alterações" : "Salvar endereço"}
-                </button>
-                {editingBranchId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingBranchId("")
-                      setBranchForm(emptyBranchForm())
-                      setShowForm(false)
-                    }}
-                    className="h-10 rounded-xl border border-[#e8edf4] px-4 text-xs font-bold text-[#718096]"
-                  >
-                    Cancelar
-                  </button>
-                )}
-              </div>
-            </form>
-          )}
+        <section className="space-y-3">
+          <h3 className="text-sm font-bold text-[#102b55]">
+            Filiais e endereços cadastrados
+          </h3>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {organization?.branches.map((branch: ApiBranch) => (
+            {organization?.branches.map((branch) => (
               <article
                 key={branch.id}
                 className="rounded-2xl border border-[#e8edf4] bg-white p-4"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <h3 className="font-bold text-[#102b55]">{branch.name}</h3>
-                  <span
-                    className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
-                      branch.isActive
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-slate-100 text-slate-600"
-                    }`}
-                  >
+                  <h4 className="font-bold text-[#102b55]">{branch.name}</h4>
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                    branch.isActive
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-slate-100 text-slate-600"
+                  }`}>
                     {branch.isActive ? "Ativa" : "Inativa"}
                   </span>
                 </div>
+                <p className="mt-3 text-xs leading-5 text-[#52657f]">
+                  {branchAddress(branch)}
+                </p>
                 <p className="mt-2 text-xs text-[#718096]">
-                  {branch.address?.text ||
-                    [
-                      [branch.address?.rua, branch.address?.numero]
-                        .filter(Boolean)
-                        .join(", "),
-                      branch.address?.complemento,
-                      branch.address?.bairro,
-                      [branch.address?.cidade, branch.address?.estado]
-                        .filter(Boolean)
-                        .join(", "),
-                      branch.address?.cep ? `CEP ${branch.address.cep}` : "",
-                    ]
-                      .filter(Boolean)
-                      .join(", ") ||
-                    "Endereço não informado"}
+                  Telefone: {branch.phone || "Não informado"}
                 </p>
-                <p className="mt-1 text-xs text-[#718096]">
-                  {branch.phone || "Telefone não informado"}
-                </p>
-                {canManage && (
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      disabled={saving}
-                      onClick={() => editBranch(branch)}
-                      className="rounded-lg border border-[#e8edf4] px-3 py-2 text-xs font-semibold"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      disabled={saving}
-                      onClick={() =>
-                        void run(
-                          () =>
-                            updateCompanyBranch(token, branch.id, {
-                              isActive: !branch.isActive,
-                            }),
-                          branch.isActive
-                            ? "Filial desativada."
-                            : "Filial reativada.",
-                        )
-                      }
-                      className="rounded-lg border border-[#e8edf4] px-3 py-2 text-xs font-semibold"
-                    >
-                      {branch.isActive ? "Desativar filial" : "Reativar filial"}
-                    </button>
-                  </div>
-                )}
               </article>
             ))}
           </div>
           {organization?.branches.length === 0 && (
             <p className="rounded-2xl border border-[#e8edf4] bg-white p-8 text-center text-sm text-[#718096]">
-              Nenhum endereço de coleta cadastrado.
+              Nenhuma filial cadastrada.
             </p>
           )}
-        </>
-      )}
-
-      {tab === "cost-centers" && (
-        <>
-          {!canManage && (
-            <p className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
-              Você tem acesso de consulta. Um administrador da empresa pode
-              gerenciar centros de custo.
-            </p>
-          )}
-          {showForm && canManage && (
-            <form onSubmit={submitCostCenter} className={formClass}>
-              <Input
-                label="Nome do centro de custo"
-                required
-                value={costCenterForm.name}
-                onChange={(event) =>
-                  setCostCenterForm({
-                    ...costCenterForm,
-                    name: event.target.value,
-                  })
-                }
-              />
-              <Input
-                label="Código (opcional)"
-                value={costCenterForm.code}
-                onChange={(event) =>
-                  setCostCenterForm({
-                    ...costCenterForm,
-                    code: event.target.value,
-                  })
-                }
-              />
-              <div className="flex items-end">
-                <button disabled={saving} className={buttonClass}>
-                  Salvar centro de custo
-                </button>
-              </div>
-            </form>
-          )}
-          <div className="overflow-x-auto rounded-2xl border border-[#e8edf4] bg-white">
-            <table className="w-full min-w-[500px] text-left text-xs">
-              <thead className="bg-[#f8fafc] text-[10px] uppercase tracking-wide text-[#7b8ba1]">
-                <tr>
-                  {["Centro de custo", "Código", "Status", "Ações"].map(
-                    (label) => (
-                      <th key={label} className="px-4 py-3">
-                        {label}
-                      </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {organization?.costCenters.map((center: ApiCostCenter) => (
-                  <tr key={center.id} className="border-t border-[#f1f4f8]">
-                    <td className="px-4 py-3 font-semibold text-[#102b55]">
-                      {center.name}
-                    </td>
-                    <td className="px-4 py-3">{center.code || "—"}</td>
-                    <td className="px-4 py-3">
-                      {center.isActive ? "Ativo" : "Inativo"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {canManage && (
-                        <button
-                          disabled={saving}
-                          onClick={() =>
-                            void run(
-                              () =>
-                                updateCompanyCostCenter(token, center.id, {
-                                  isActive: !center.isActive,
-                                }),
-                              center.isActive
-                                ? "Centro de custo desativado."
-                                : "Centro de custo reativado.",
-                            )
-                          }
-                          className="rounded-lg border border-[#e8edf4] px-3 py-2 font-semibold"
-                        >
-                          {center.isActive ? "Desativar" : "Reativar"}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {organization?.costCenters.length === 0 && (
-              <p className="p-8 text-center text-sm text-[#718096]">
-                Nenhum centro de custo cadastrado.
-              </p>
-            )}
-          </div>
-        </>
+        </section>
       )}
     </div>
   )

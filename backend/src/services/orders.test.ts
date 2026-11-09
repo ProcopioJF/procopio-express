@@ -71,6 +71,21 @@ describe("company order permissions", () => {
     assert.equal(query.take, 10);
   });
 
+  it("applies a destination-neighborhood filter to delivery records", () => {
+    const query = buildOrderListQuery(
+      { neighborhood: " São Mateus " },
+      { companyId: "company-a", allowCompanyFilter: false },
+    )
+
+    assert.deepEqual(query.where, {
+      companyId: "company-a",
+      deliveryNeighborhood: {
+        contains: "São Mateus",
+        mode: "insensitive",
+      },
+    })
+  })
+
   it("allows company administrators and standard users to create orders", () => {
     assert.doesNotThrow(() => assertCompanyCanCreateOrder("ADMIN"));
     assert.doesNotThrow(() => assertCompanyCanCreateOrder("STANDARD"));

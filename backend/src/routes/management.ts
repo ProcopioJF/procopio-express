@@ -6,8 +6,8 @@ import {
   companyBranchPickupAddressSchema,
   companyPickupAddressQuerySchema,
   companyCostCenterSchema,
-  companyMemberSchema,
-  companyMemberUpdateSchema,
+  adminCompanyMemberSchema,
+  adminCompanyMemberUpdateSchema,
   dashboardCompanyScopeSchema,
   financialEntryListQuerySchema,
   financialEntrySchema,
@@ -84,17 +84,6 @@ async function audit(req: Request, action: string, entity: string, entityId?: st
       details,
     },
   });
-}
-
-async function requireCompanyAdmin(req: Request) {
-  const id = companyId(req);
-  const user = await prisma.user.findUnique({
-    where: { id: req.actor!.id },
-    select: { companyPermission: true, isActive: true },
-  });
-  if (!user?.isActive) throw new HttpError(403, "Usuário inativo");
-  if (user.companyPermission !== "ADMIN") throw new HttpError(403, "Apenas administradores da empresa podem fazer esta alteração");
-  return id;
 }
 
 adminRouter.use(requireAuth, requireAdmin);
@@ -659,8 +648,7 @@ adminRouter.post("/price-tables/:tableId/import", route(async (req, res) => {
   res.json({ imported });
 }));
 
-companyRouter.get("/organization", route(async (req, res) => {
-  const id = companyId(req);
+async function getCompanyOrganization(id: string) {
   const [company, members, branches, costCenters, subscription] = await Promise.all([
     prisma.company.findUnique({ where: { id } }),
     prisma.user.findMany({
@@ -677,38 +665,64 @@ companyRouter.get("/organization", route(async (req, res) => {
     }),
   ]);
   if (!company) throw new HttpError(404, "Empresa não encontrada");
-  const address = company.address && typeof company.address === "object" && !Array.isArray(company.address)
+  const rawAddress = company.address
+  const address = rawAddress && typeof rawAddress === "object" && !Array.isArray(rawAddress)
     ? company.address as Prisma.JsonObject
     : {};
-  res.json({
-    organization: {
-      company: {
-        id: company.id,
-        name: company.name,
-        document: company.document ?? "",
-        phone: company.phone ?? "",
-        email: company.email ?? "",
-        address: typeof address.text === "string" ? address.text : "",
-      },
-      members: members.map((member) => ({
-        id: member.id,
-        name: member.name,
-        email: member.email,
-        phone: member.phone,
-        role: member.role.name,
-        companyPermission: member.companyPermission,
-        isActive: member.isActive,
-      })),
-      branches: branches.map((branch) => ({
-        ...branch,
-        address: branch.address && typeof branch.address === "object" && !Array.isArray(branch.address)
-          ? branch.address
-          : branch.address ? { text: String(branch.address) } : null,
-      })),
-      costCenters,
-      subscription,
+  const structuredAddress = address.pickupAddress &&
+    typeof address.pickupAddress === "object" &&
+    !Array.isArray(address.pickupAddress)
+    ? address.pickupAddress as Prisma.JsonObject
+    : address;
+  const addressPart = (key: string) =>
+    typeof structuredAddress[key] === "string"
+      ? String(structuredAddress[key]).trim()
+      : "";
+  const formattedAddress = [
+    [addressPart("rua"), addressPart("numero")].filter(Boolean).join(", "),
+    addressPart("complemento"),
+    addressPart("bairro"),
+    [addressPart("cidade"), addressPart("estado")].filter(Boolean).join(" - "),
+    addressPart("cep") ? `CEP ${addressPart("cep")}` : "",
+  ].filter(Boolean).join(", ");
+  return {
+    company: {
+      id: company.id,
+      name: company.name,
+      document: company.document ?? "",
+      phone: company.phone ?? "",
+      email: company.email ?? "",
+      address:
+        (typeof address.text === "string" ? address.text : "") ||
+        formattedAddress ||
+        (typeof rawAddress === "string" ? rawAddress : ""),
     },
-  });
+    members: members.map((member) => ({
+      id: member.id,
+      name: member.name,
+      email: member.email,
+      phone: member.phone,
+      role: member.role.name,
+      companyPermission: member.companyPermission,
+      isActive: member.isActive,
+    })),
+    branches: branches.map((branch) => ({
+      ...branch,
+      address: branch.address && typeof branch.address === "object" && !Array.isArray(branch.address)
+        ? branch.address
+        : branch.address ? { text: String(branch.address) } : null,
+    })),
+    costCenters,
+    subscription,
+  };
+}
+
+companyRouter.get("/organization", route(async (req, res) => {
+  res.json({ organization: await getCompanyOrganization(companyId(req)) });
+}));
+
+adminRouter.get("/companies/:companyId/organization", route(async (req, res) => {
+  res.json({ organization: await getCompanyOrganization(String(req.params.companyId)) });
 }));
 
 companyRouter.get("/pickup-addresses", route(async (req, res) => {
@@ -813,9 +827,36 @@ companyRouter.put("/settings", route(async () => {
   throw new HttpError(403, "Os dados cadastrais da empresa só podem ser alterados pela administração do Procópio Express.");
 }));
 
-companyRouter.post("/members", route(async (req, res) => {
-  const id = await requireCompanyAdmin(req);
-  const data = companyMemberSchema.parse(req.body);
+companyRouter.post("/members", route(async () => {
+  throw new HttpError(403, "Usuários da empresa só podem ser gerenciados pela administração do Procópio Express.");
+}));
+
+companyRouter.patch("/members/:id", route(async () => {
+  throw new HttpError(403, "Usuários da empresa só podem ser gerenciados pela administração do Procópio Express.");
+}));
+
+companyRouter.post("/branches", route(async () => {
+  throw new HttpError(403, "Filiais só podem ser gerenciadas pela administração do Procópio Express.");
+}));
+
+companyRouter.patch("/branches/:id", route(async () => {
+  throw new HttpError(403, "Filiais só podem ser gerenciadas pela administração do Procópio Express.");
+}));
+
+companyRouter.post("/cost-centers", route(async () => {
+  throw new HttpError(403, "Centros de custo só podem ser gerenciados pela administração do Procópio Express.");
+}));
+
+companyRouter.patch("/cost-centers/:id", route(async () => {
+  throw new HttpError(403, "Centros de custo só podem ser gerenciados pela administração do Procópio Express.");
+}));
+
+adminRouter.post("/companies/:companyId/members", route(async (req, res) => {
+  const id = String(req.params.companyId);
+  if (!await prisma.company.findUnique({ where: { id }, select: { id: true } })) {
+    throw new HttpError(404, "Empresa não encontrada.");
+  }
+  const data = adminCompanyMemberSchema.parse(req.body);
   const email = data.email.toLowerCase();
   if (await prisma.user.findUnique({ where: { email }, select: { id: true } })) {
     throw new HttpError(409, "Já existe uma conta com este e-mail");
@@ -849,10 +890,10 @@ companyRouter.post("/members", route(async (req, res) => {
   });
 }));
 
-companyRouter.patch("/members/:id", route(async (req, res) => {
-  const id = await requireCompanyAdmin(req);
+adminRouter.patch("/companies/:companyId/members/:id", route(async (req, res) => {
+  const id = String(req.params.companyId);
   const targetId = String(req.params.id);
-  const data = companyMemberUpdateSchema.parse(req.body);
+  const data = adminCompanyMemberUpdateSchema.parse(req.body);
   const member = await prisma.$transaction(async (tx) => {
     const target = await tx.user.findFirst({
       where: { id: targetId, companyId: id, role: { name: "COMPANY" } },
@@ -861,9 +902,16 @@ companyRouter.patch("/members/:id", route(async (req, res) => {
     if (target.id === req.actor!.id && (data.isActive === false || data.companyPermission !== undefined)) {
       throw new HttpError(400, "Não é possível remover sua própria permissão de administrador");
     }
-    const removingAdmin = target.companyPermission === "ADMIN" && (
-      data.isActive === false || data.companyPermission !== undefined
-    );
+    const email = data.email?.toLowerCase()
+    if (email && email !== target.email) {
+      const existing = await tx.user.findUnique({ where: { email }, select: { id: true } })
+      if (existing) throw new HttpError(409, "Já existe uma conta com este e-mail")
+    }
+    const removingAdmin = target.isActive &&
+      target.companyPermission === "ADMIN" &&
+      (data.isActive === false ||
+        (data.companyPermission !== undefined &&
+          data.companyPermission !== target.companyPermission))
     if (removingAdmin) {
       const adminCount = await tx.user.count({
         where: { companyId: id, isActive: true, companyPermission: "ADMIN", role: { name: "COMPANY" } },
@@ -872,7 +920,13 @@ companyRouter.patch("/members/:id", route(async (req, res) => {
     }
     return tx.user.update({
       where: { id: targetId },
-      data,
+      data: {
+        name: data.name,
+        email,
+        phone: data.phone,
+        isActive: data.isActive,
+        companyPermission: data.companyPermission,
+      },
       include: { role: { select: { name: true } } },
     });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -890,8 +944,11 @@ companyRouter.patch("/members/:id", route(async (req, res) => {
   });
 }));
 
-companyRouter.post("/branches", route(async (req, res) => {
-  const id = await requireCompanyAdmin(req);
+adminRouter.post("/companies/:companyId/branches", route(async (req, res) => {
+  const id = String(req.params.companyId);
+  if (!await prisma.company.findUnique({ where: { id }, select: { id: true } })) {
+    throw new HttpError(404, "Empresa não encontrada.");
+  }
   const data = companyBranchSchema.parse(req.body);
   const branch = await prisma.companyBranch.create({
     data: {
@@ -905,8 +962,8 @@ companyRouter.post("/branches", route(async (req, res) => {
   res.status(201).json({ branch });
 }));
 
-companyRouter.patch("/branches/:id", route(async (req, res) => {
-  const id = await requireCompanyAdmin(req);
+adminRouter.patch("/companies/:companyId/branches/:id", route(async (req, res) => {
+  const id = String(req.params.companyId);
   const data = companyBranchSchema.partial().parse(req.body);
   if (!Object.keys(data).length) throw new HttpError(400, "Informe ao menos um campo para atualizar");
   const branchId = String(req.params.id);
@@ -925,8 +982,11 @@ companyRouter.patch("/branches/:id", route(async (req, res) => {
   res.json({ branch });
 }));
 
-companyRouter.post("/cost-centers", route(async (req, res) => {
-  const id = await requireCompanyAdmin(req);
+adminRouter.post("/companies/:companyId/cost-centers", route(async (req, res) => {
+  const id = String(req.params.companyId);
+  if (!await prisma.company.findUnique({ where: { id }, select: { id: true } })) {
+    throw new HttpError(404, "Empresa não encontrada.");
+  }
   const data = companyCostCenterSchema.parse(req.body);
   const costCenter = await prisma.companyCostCenter.create({
     data: { companyId: id, name: data.name, code: data.code },
@@ -935,8 +995,8 @@ companyRouter.post("/cost-centers", route(async (req, res) => {
   res.status(201).json({ costCenter });
 }));
 
-companyRouter.patch("/cost-centers/:id", route(async (req, res) => {
-  const id = await requireCompanyAdmin(req);
+adminRouter.patch("/companies/:companyId/cost-centers/:id", route(async (req, res) => {
+  const id = String(req.params.companyId);
   const data = companyCostCenterSchema.partial().parse(req.body);
   if (!Object.keys(data).length) throw new HttpError(400, "Informe ao menos um campo para atualizar");
   const costCenterId = String(req.params.id);

@@ -6,6 +6,28 @@ type CountRow = { bucket: string; orders: bigint | number }
 type MonthRow = CountRow & { total: number | null; pricedOrders: number }
 type HourRow = { hour: number; orders: bigint | number }
 type NameCountRow = { name: string; orders: bigint | number }
+type NeighborhoodRankingRow = { name: string; orders: number }
+
+export type NeighborhoodRankingItem = NeighborhoodRankingRow & {
+  percentage: number
+}
+
+export function buildNeighborhoodRanking(
+  rows: Array<{ name: string; orders: number }>,
+): { neighborhoods: NeighborhoodRankingItem[]; totalOrders: number } {
+  const validRows = rows
+    .map((row) => ({ name: row.name.trim(), orders: Number(row.orders) }))
+    .filter((row) => row.name && Number.isFinite(row.orders) && row.orders > 0)
+    .sort((left, right) => right.orders - left.orders || left.name.localeCompare(right.name, "pt-BR"))
+  const totalOrders = validRows.reduce((total, row) => total + row.orders, 0)
+  return {
+    neighborhoods: validRows.slice(0, 10).map((row) => ({
+      ...row,
+      percentage: totalOrders > 0 ? (row.orders / totalOrders) * 100 : 0,
+    })),
+    totalOrders,
+  }
+}
 
 function saoPauloParts(date: Date) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -163,4 +185,40 @@ export async function getDashboardCharts(companyId?: string) {
     previousMonthOrders: monthlyData.at(-2)?.orders ?? 0,
     currentMonthOrders: monthlyData.at(-1)?.orders ?? 0,
   }
+}
+
+export async function getNeighborhoodRanking(
+  companyId: string | undefined,
+  from: string,
+  to: string,
+): Promise<{ neighborhoods: NeighborhoodRankingItem[]; totalOrders: number }> {
+  const start = new Date(`${from}T03:00:00.000Z`)
+  const end = new Date(`${to}T03:00:00.000Z`)
+  if (
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime()) ||
+    start.toISOString().slice(0, 10) !== from ||
+    end.toISOString().slice(0, 10) !== to
+  ) {
+    throw new Error("Período inválido para o ranking de bairros.")
+  }
+  end.setUTCDate(end.getUTCDate() + 1)
+
+  const scope = companyId
+    ? Prisma.sql`AND "companyId" = ${companyId}`
+    : Prisma.empty
+  const rows = await prisma.$queryRaw<NeighborhoodRankingRow[]>(Prisma.sql`
+    SELECT MIN(BTRIM("deliveryNeighborhood")) AS name,
+           COUNT(*)::int AS orders
+    FROM "Order"
+    WHERE "createdAt" >= ${start}
+      AND "createdAt" < ${end}
+      AND "status" <> 'CANCELLED'
+      AND "deliveryNeighborhood" IS NOT NULL
+      AND BTRIM("deliveryNeighborhood") <> ''
+      ${scope}
+    GROUP BY LOWER(BTRIM("deliveryNeighborhood"))
+    ORDER BY orders DESC, name ASC
+  `)
+  return buildNeighborhoodRanking(rows)
 }

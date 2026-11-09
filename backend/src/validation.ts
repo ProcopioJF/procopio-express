@@ -25,6 +25,8 @@ export const orderListQuerySchema = z
 
     search: z.string().trim().max(120).default(""),
 
+    neighborhood: z.string().trim().max(120).optional(),
+
     status: z
       .enum([
         "PENDING",
@@ -62,6 +64,17 @@ export const intelligenceRequestSchema = intelligenceQuestionSchema.extend({
 export const dashboardCompanyScopeSchema = z.object({
   companyId: z.string().trim().min(1).max(120).optional(),
 })
+
+export const dashboardNeighborhoodRankingQuerySchema =
+  dashboardCompanyScopeSchema
+    .extend({
+      from: dateOnlySchema,
+      to: dateOnlySchema,
+    })
+    .refine(({ from, to }) => from <= to, {
+      message: "A data inicial deve ser anterior ou igual à data final.",
+      path: ["to"],
+    })
 
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, "Informe sua senha atual"),
@@ -298,6 +311,24 @@ export const companyMemberSchema = z.object({
 
   companyPermission: z.enum(["STANDARD", "RESTRICTED"]).default("STANDARD"),
 })
+
+export const adminCompanyMemberSchema = companyMemberSchema.extend({
+  companyPermission: z
+    .enum(["ADMIN", "STANDARD", "RESTRICTED"])
+    .default("STANDARD"),
+})
+
+export const adminCompanyMemberUpdateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    email: z.string().trim().email().max(254).optional(),
+    phone: nullableText(30),
+    isActive: z.boolean().optional(),
+    companyPermission: z.enum(["ADMIN", "STANDARD", "RESTRICTED"]).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Informe ao menos um campo para atualizar.",
+  })
 
 export const adminCompanyUpdateSchema = z
   .object({

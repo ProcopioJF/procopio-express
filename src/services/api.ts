@@ -147,6 +147,15 @@ export type ApiDashboardCharts = {
   currentMonthOrders: number
 }
 
+export type ApiNeighborhoodRanking = {
+  neighborhoods: Array<{
+    name: string
+    orders: number
+    percentage: number
+  }>
+  totalOrders: number
+}
+
 export type ApiIntelligenceNamedCount = { name: string; count: number }
 
 export type ApiIntelligenceMetrics = {
@@ -522,6 +531,8 @@ export type ApiOrderListQuery = {
 
   search?: string
 
+  neighborhood?: string
+
   status?: ApiOrder["status"] | "COMPLETED"
 
   companyId?: string
@@ -545,13 +556,15 @@ export type ApiOrderListResult = {
 export async function getPanelOrders(
   token: string,
 
-  role: "admin" | "company" | "courier",
+  role: "admin" | "company" | "company-finance" | "courier",
 
   query: ApiOrderListQuery = {},
 ) {
   const path =
-    role === "company"
-      ? "/company/orders"
+    role === "company" || role === "company-finance"
+      ? role === "company-finance"
+        ? "/company/financial-orders"
+        : "/company/orders"
       : role === "courier"
         ? "/courier/orders"
         : "/admin/orders"
@@ -583,6 +596,20 @@ export async function getDashboardCharts(token: string, companyId?: string) {
     : ""
   return authorizedRequest<{ charts: ApiDashboardCharts }>(
     `/dashboard/charts${query}`,
+    token,
+  )
+}
+
+export async function getNeighborhoodRanking(
+  token: string,
+  from: string,
+  to: string,
+  companyId?: string,
+) {
+  const params = new URLSearchParams({ from, to })
+  if (companyId) params.set("companyId", companyId)
+  return authorizedRequest<ApiNeighborhoodRanking>(
+    `/dashboard/neighborhood-ranking?${params.toString()}`,
     token,
   )
 }
@@ -1507,6 +1534,112 @@ export async function updateCompanyCostCenter(
 
       body: JSON.stringify(updates),
     },
+  )
+}
+
+export async function getAdminCompanyOrganization(
+  token: string,
+  companyId: string,
+) {
+  return authorizedRequest<{ organization: ApiOrganization }>(
+    `/admin/companies/${encodeURIComponent(companyId)}/organization`,
+    token,
+  )
+}
+
+export async function createAdminCompanyMember(
+  token: string,
+  companyId: string,
+  member: {
+    name: string
+    email: string
+    phone?: string
+    password: string
+    companyPermission?: NonNullable<ApiUser["companyPermission"]>
+  },
+) {
+  return authorizedRequest<{ member: ApiCompanyMember }>(
+    `/admin/companies/${encodeURIComponent(companyId)}/members`,
+    token,
+    { method: "POST", body: JSON.stringify(member) },
+  )
+}
+
+export async function updateAdminCompanyMember(
+  token: string,
+  companyId: string,
+  id: string,
+  updates: {
+    name?: string
+    email?: string
+    phone?: string | null
+    isActive?: boolean
+    companyPermission?: NonNullable<ApiUser["companyPermission"]>
+  },
+) {
+  return authorizedRequest<{ member: ApiCompanyMember }>(
+    `/admin/companies/${encodeURIComponent(companyId)}/members/${encodeURIComponent(id)}`,
+    token,
+    { method: "PATCH", body: JSON.stringify(updates) },
+  )
+}
+
+export async function createAdminCompanyBranch(
+  token: string,
+  companyId: string,
+  branch: {
+    name: string
+    phone?: string
+    address?: Omit<ApiBranchAddress, "text">
+  },
+) {
+  return authorizedRequest<{ branch: ApiBranch }>(
+    `/admin/companies/${encodeURIComponent(companyId)}/branches`,
+    token,
+    { method: "POST", body: JSON.stringify(branch) },
+  )
+}
+
+export async function updateAdminCompanyBranch(
+  token: string,
+  companyId: string,
+  id: string,
+  updates: Partial<{
+    name: string
+    phone: string
+    address: Omit<ApiBranchAddress, "text">
+    isActive: boolean
+  }>,
+) {
+  return authorizedRequest<{ branch: ApiBranch }>(
+    `/admin/companies/${encodeURIComponent(companyId)}/branches/${encodeURIComponent(id)}`,
+    token,
+    { method: "PATCH", body: JSON.stringify(updates) },
+  )
+}
+
+export async function createAdminCompanyCostCenter(
+  token: string,
+  companyId: string,
+  costCenter: { name: string; code?: string },
+) {
+  return authorizedRequest<{ costCenter: ApiCostCenter }>(
+    `/admin/companies/${encodeURIComponent(companyId)}/cost-centers`,
+    token,
+    { method: "POST", body: JSON.stringify(costCenter) },
+  )
+}
+
+export async function updateAdminCompanyCostCenter(
+  token: string,
+  companyId: string,
+  id: string,
+  updates: Partial<{ name: string; code: string; isActive: boolean }>,
+) {
+  return authorizedRequest<{ costCenter: ApiCostCenter }>(
+    `/admin/companies/${encodeURIComponent(companyId)}/cost-centers/${encodeURIComponent(id)}`,
+    token,
+    { method: "PATCH", body: JSON.stringify(updates) },
   )
 }
 

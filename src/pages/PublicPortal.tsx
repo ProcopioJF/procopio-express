@@ -982,26 +982,6 @@ export default function PublicPortal({
                   {dropoff.complement && <SummaryRow label="Complemento" value={dropoff.complement}/>}
                 </div>
 
-                {/* Observations */}
-                {companyOrderMode && (
-                  <div className="grid gap-3 rounded-2xl border border-[#e2e8f0] bg-white p-5 sm:grid-cols-2">
-                    <label className="text-xs font-semibold text-[#64748b]">
-                      Filial (opcional)
-                      <select value={branchId} onChange={event => setBranchId(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-sm text-[#0f172a]">
-                        <option value="">Sede / não especificada</option>
-                        {organization?.branches.filter(branch => branch.isActive).map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-                      </select>
-                    </label>
-                    <label className="text-xs font-semibold text-[#64748b]">
-                      Centro de custo (opcional)
-                      <select value={costCenterId} onChange={event => setCostCenterId(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-sm text-[#0f172a]">
-                        <option value="">Não especificado</option>
-                        {organization?.costCenters.filter(center => center.isActive).map(center => <option key={center.id} value={center.id}>{center.code ? `${center.code} · ` : ""}{center.name}</option>)}
-                      </select>
-                    </label>
-                  </div>
-                )}
-
                 <div className="bg-white rounded-2xl border border-[#e2e8f0] p-5 shadow-sm">
                   <label className="block text-xs font-600 text-[#64748b] uppercase tracking-wide mb-2">
                     Observações (opcional)

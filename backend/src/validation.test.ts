@@ -4,6 +4,8 @@ import { describe, it } from "node:test"
 
 import {
   addressSchema,
+  adminCompanyMemberSchema,
+  adminCompanyMemberUpdateSchema,
   adminCompanyUpdateSchema,
   adminOrderStatusSchema,
   companyBranchPickupAddressSchema,
@@ -16,6 +18,7 @@ import {
   changePasswordSchema,
   courierOrderStatusSchema,
   dashboardCompanyScopeSchema,
+  dashboardNeighborhoodRankingQuerySchema,
   financialEntryListQuerySchema,
   financialEntrySchema,
   leadSchema,
@@ -37,6 +40,30 @@ describe("admin dashboard company context", () => {
     )
     assert.equal(
       dashboardCompanyScopeSchema.safeParse({ companyId: "" }).success,
+      false,
+    )
+  })
+
+  it("requires a valid ordered date range for neighborhood rankings", () => {
+    assert.deepEqual(
+      dashboardNeighborhoodRankingQuerySchema.parse({
+        from: "2026-03-01",
+        to: "2026-03-31",
+      }),
+      { from: "2026-03-01", to: "2026-03-31" },
+    )
+    assert.equal(
+      dashboardNeighborhoodRankingQuerySchema.safeParse({
+        from: "2026-03-31",
+        to: "2026-03-01",
+      }).success,
+      false,
+    )
+    assert.equal(
+      dashboardNeighborhoodRankingQuerySchema.safeParse({
+        from: "2026-02-30",
+        to: "2026-03-01",
+      }).success,
       false,
     )
   })
@@ -76,6 +103,30 @@ describe("company member permissions", () => {
     assert.equal(
       companyMemberUpdateSchema.safeParse({ companyPermission: "STANDARD" })
         .success,
+      true,
+    )
+  })
+
+  it("allows central administration to grant and update company administrator access", () => {
+    assert.equal(
+      adminCompanyMemberSchema.parse({
+        ...member,
+        companyPermission: "ADMIN",
+      }).companyPermission,
+      "ADMIN",
+    )
+    assert.equal(
+      adminCompanyMemberUpdateSchema.safeParse({
+        companyPermission: "ADMIN",
+      }).success,
+      true,
+    )
+    assert.equal(
+      adminCompanyMemberUpdateSchema.safeParse({
+        name: "Updated name",
+        email: "updated@example.com",
+        phone: "32999990000",
+      }).success,
       true,
     )
   })
@@ -499,6 +550,21 @@ describe("decimal(10,2) validation limits", () => {
 
         status: "COMPLETED",
       })
+    })
+
+    it("accepts a bounded destination-neighborhood filter", () => {
+      assert.equal(
+        orderListQuerySchema.safeParse({
+          neighborhood: " São Mateus ",
+        }).success,
+        true,
+      )
+      assert.equal(
+        orderListQuerySchema.safeParse({
+          neighborhood: "x".repeat(121),
+        }).success,
+        false,
+      )
     })
 
     it("rejects impossible dates, reversed ranges, and oversized pages", () => {

@@ -109,6 +109,12 @@ export function buildOrderListQuery(
       { deliveryNeighborhood: { contains: query.search, mode: "insensitive" } },
     ];
   }
+  if (query.neighborhood) {
+    where.deliveryNeighborhood = {
+      contains: query.neighborhood,
+      mode: "insensitive",
+    };
+  }
   return {
     query,
     where,

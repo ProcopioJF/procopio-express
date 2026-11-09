@@ -6,7 +6,6 @@ import {
   Building2,
   CircleDollarSign,
   Download,
-  FileText,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -34,17 +33,19 @@ import {
   formatOrderPrice,
   ORDER_STATUS_LABELS,
   getDashboardCharts,
+  getNeighborhoodRanking,
   getCompanySettings,
   getDashboardSummary,
   getPanelOrders,
   type ApiCompanySettings,
   type ApiDashboardSummary,
   type ApiDashboardCharts,
+  type ApiNeighborhoodRanking,
   type ApiOrder,
   type ApiUser,
 } from "../services/api"
 
-type Section = "overview" | "orders" | "intelligence" | "finance" | "reports" | "profile"
+type Section = "overview" | "orders" | "intelligence" | "finance" | "profile"
 
 const NAV: Array<{
   id: Section | "new-order"
@@ -60,8 +61,6 @@ const NAV: Array<{
   { id: "intelligence", label: "Procópio Intelligence", icon: Sparkles },
 
   { id: "finance", label: "Financeiro", icon: CircleDollarSign },
-
-  { id: "reports", label: "Relatórios", icon: FileText },
 
   { id: "profile", label: "Perfil da Empresa", icon: Building2 },
 ]
@@ -120,6 +119,55 @@ const address = (
   number?: string | null,
   neighborhood?: string | null,
 ) => [street, number, neighborhood].filter(Boolean).join(", ") || "—"
+
+type RankingPeriod =
+  | "today"
+  | "last7days"
+  | "thisWeek"
+  | "thisMonth"
+  | "last30days"
+  | "custom"
+
+const saoPauloDateKey = (date: Date) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date)
+  const get = (type: string) => parts.find((part) => part.type === type)?.value
+  const year = get("year")
+  const month = get("month")
+  const day = get("day")
+  if (!year || !month || !day) throw new Error("Não foi possível definir o período.")
+  return `${year}-${month}-${day}`
+}
+
+const shiftDateKey = (key: string, days: number) => {
+  const date = new Date(`${key}T12:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+function rankingDateRange(
+  period: RankingPeriod,
+  customFrom: string,
+  customTo: string,
+) {
+  const today = saoPauloDateKey(new Date())
+  if (period === "custom") {
+    return { from: customFrom, to: customTo }
+  }
+  if (period === "today") return { from: today, to: today }
+  if (period === "last7days") return { from: shiftDateKey(today, -6), to: today }
+  if (period === "last30days") return { from: shiftDateKey(today, -29), to: today }
+  if (period === "thisMonth") {
+    return { from: `${today.slice(0, 7)}-01`, to: today }
+  }
+  const weekday = new Date(`${today}T12:00:00.000Z`).getUTCDay()
+  const mondayOffset = (weekday + 6) % 7
+  return { from: shiftDateKey(today, -mondayOffset), to: today }
+}
 
 function MetricCard({
   label,
@@ -391,6 +439,30 @@ export default function CompanyDashboard({
     totalPages: 0,
   })
 
+  const [financeOrders, setFinanceOrders] = useState<ApiOrder[]>([])
+  const [financePage, setFinancePage] = useState({
+    page: 1,
+    pageSize: 25,
+    total: 0,
+    totalPages: 0,
+  })
+  const [financeFrom, setFinanceFrom] = useState("")
+  const [financeTo, setFinanceTo] = useState("")
+  const [financeNeighborhood, setFinanceNeighborhood] = useState("")
+  const [financeSearch, setFinanceSearch] = useState("")
+  const [financeStatus, setFinanceStatus] = useState<
+    "all" | "COMPLETED" | ApiOrder["status"]
+  >("all")
+  const [rankingPeriod, setRankingPeriod] = useState<RankingPeriod>("thisMonth")
+  const [rankingFrom, setRankingFrom] = useState(() => {
+    const today = saoPauloDateKey(new Date())
+    return `${today.slice(0, 7)}-01`
+  })
+  const [rankingTo, setRankingTo] = useState(() => saoPauloDateKey(new Date()))
+  const [ranking, setRanking] = useState<ApiNeighborhoodRanking | null>(null)
+  const [rankingLoading, setRankingLoading] = useState(false)
+  const [rankingError, setRankingError] = useState("")
+
   const [loading, setLoading] = useState(true)
 
   const [error, setError] = useState("")
@@ -438,6 +510,43 @@ export default function CompanyDashboard({
     void refresh()
   }, [refresh])
 
+  useEffect(() => {
+    const range = rankingDateRange(rankingPeriod, rankingFrom, rankingTo)
+    if (!range.from || !range.to || range.from > range.to) {
+      setRanking(null)
+      setRankingLoading(false)
+      setRankingError(
+        rankingPeriod === "custom"
+          ? "Informe um intervalo válido para consultar o ranking."
+          : "",
+      )
+      return
+    }
+
+    let active = true
+    setRankingLoading(true)
+    setRankingError("")
+    getNeighborhoodRanking(token, range.from, range.to)
+      .then((result) => {
+        if (active) setRanking(result)
+      })
+      .catch((cause: unknown) => {
+        if (active) {
+          setRankingError(
+            cause instanceof Error
+              ? cause.message
+              : "Não foi possível carregar o ranking de bairros.",
+          )
+        }
+      })
+      .finally(() => {
+        if (active) setRankingLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [rankingPeriod, rankingFrom, rankingTo, token])
+
   const filteredOrders = orders
 
   const loadOrderPage = async (page: number) => {
@@ -459,6 +568,32 @@ export default function CompanyDashboard({
         cause instanceof Error
           ? cause.message
           : "Não foi possível carregar as entregas.",
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadFinancePage = async (page: number) => {
+    setLoading(true)
+    setError("")
+    try {
+      const result = await getPanelOrders(token, "company-finance", {
+        page,
+        pageSize: 25,
+        search: financeSearch.trim(),
+        neighborhood: financeNeighborhood.trim() || undefined,
+        status: financeStatus === "all" ? undefined : financeStatus,
+        from: financeFrom || undefined,
+        to: financeTo || undefined,
+      })
+      setFinanceOrders(result.orders)
+      if (result.pagination) setFinancePage(result.pagination)
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Não foi possível carregar o histórico financeiro.",
       )
     } finally {
       setLoading(false)
@@ -664,7 +799,10 @@ export default function CompanyDashboard({
               onClick={() => {
                 setMobileMenuOpen(false)
                 if (id === "new-order") onNewOrder()
-                else setSection(id)
+                else {
+                  setSection(id)
+                  if (id === "finance") void loadFinancePage(1)
+                }
               }}
               aria-current={section === id ? "page" : undefined}
               className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-semibold transition-colors duration-200 ${
@@ -919,6 +1057,93 @@ export default function CompanyDashboard({
                 />
               </div>
               <DashboardChartsPanel data={charts} />
+              <section className="space-y-4 rounded-2xl border border-[#e8edf4] bg-white p-4 shadow-[0_3px_14px_rgba(15,35,65,0.04)] sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-[#f47b20]">
+                      TOP 10
+                    </p>
+                    <h3 className="mt-1 text-sm font-bold text-[#102b55]">
+                      Bairros mais atendidos
+                    </h3>
+                    <p className="mt-1 text-xs text-[#8795a8]">
+                      Entregas válidas no período. Percentual calculado entre bairros identificados.
+                    </p>
+                  </div>
+                  <label className="min-w-[180px] text-[10px] font-semibold text-[#718096]">
+                    Período
+                    <select
+                      value={rankingPeriod}
+                      onChange={(event) => setRankingPeriod(event.target.value as RankingPeriod)}
+                      className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-xs text-[#102b55]"
+                    >
+                      <option value="today">Hoje</option>
+                      <option value="last7days">Últimos 7 dias</option>
+                      <option value="thisWeek">Esta semana</option>
+                      <option value="thisMonth">Este mês</option>
+                      <option value="last30days">Últimos 30 dias</option>
+                      <option value="custom">Personalizado</option>
+                    </select>
+                  </label>
+                </div>
+                {rankingPeriod === "custom" && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="text-[10px] font-semibold text-[#718096]">
+                      Data inicial
+                      <input
+                        type="date"
+                        value={rankingFrom}
+                        onChange={(event) => setRankingFrom(event.target.value)}
+                        className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-xs"
+                      />
+                    </label>
+                    <label className="text-[10px] font-semibold text-[#718096]">
+                      Data final
+                      <input
+                        type="date"
+                        value={rankingTo}
+                        onChange={(event) => setRankingTo(event.target.value)}
+                        className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-xs"
+                      />
+                    </label>
+                  </div>
+                )}
+                {rankingError && (
+                  <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">{rankingError}</p>
+                )}
+                {rankingLoading ? (
+                  <p className="py-6 text-center text-xs text-[#718096]">Carregando ranking…</p>
+                ) : ranking?.neighborhoods.length ? (
+                  <ol className="divide-y divide-[#f1f4f8]">
+                    {ranking.neighborhoods.map((item, index) => (
+                      <li key={item.name} className="flex items-center gap-3 py-3">
+                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#fff3e9] text-xs font-extrabold text-[#d66b19]">
+                          {index + 1}º
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <b className="truncate text-[#102b55]">{item.name}</b>
+                            <span className="shrink-0 text-[#718096]">{item.orders.toLocaleString("pt-BR")} entregas</span>
+                          </div>
+                          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#edf1f6]">
+                            <div
+                              className="h-full rounded-full bg-[#f47b20]"
+                              style={{ width: `${Math.min(100, item.percentage)}%` }}
+                            />
+                          </div>
+                        </div>
+                        <span className="w-12 shrink-0 text-right text-[10px] font-semibold text-[#718096]">
+                          {item.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : !rankingError ? (
+                  <p className="rounded-xl bg-[#f8fafc] p-6 text-center text-xs text-[#718096]">
+                    Não há entregas com bairro de destino identificado neste período.
+                  </p>
+                ) : null}
+              </section>
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="text-sm font-bold text-[#102b55]">
@@ -1106,27 +1331,158 @@ export default function CompanyDashboard({
                 confirmam pagamentos ou recebimentos e não representam saldo
                 conciliado. A conciliação financeira ainda não está disponível.
               </div>
-            </div>
-          )}
-
-          {section === "reports" && (
-            <div className="max-w-3xl rounded-2xl border border-[#e8edf4] bg-white p-6">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#fff3e9] text-[#e97820]">
-                <FileText size={18} />
-              </span>
-              <h2 className="mt-4 font-bold text-[#102b55]">
-                Relatório das entregas
-              </h2>
-              <p className="mt-1 text-sm text-[#718096]">
-                Exporte os registros empresariais disponíveis na sua conta,
-                incluindo valores e endereços.
-              </p>
-              <button
-                onClick={exportCsv}
-                className="mt-5 flex items-center gap-2 rounded-xl bg-[#0c225a] px-4 py-2.5 text-sm font-bold text-white"
-              >
-                <Download size={15} /> Baixar CSV
-              </button>
+              <section className="space-y-4 rounded-2xl border border-[#e8edf4] bg-white p-4 sm:p-5">
+                <div>
+                  <h3 className="text-sm font-bold text-[#102b55]">
+                    Histórico de valores registrados
+                  </h3>
+                  <p className="mt-1 text-xs text-[#8795a8]">
+                    Somente entregas com valor salvo no pedido. Estes dados são informativos.
+                  </p>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+                  <input
+                    value={financeSearch}
+                    onChange={(event) => setFinanceSearch(event.target.value)}
+                    placeholder="Nº, solicitante ou destinatário"
+                    className="h-10 min-w-0 rounded-xl border border-[#e2e8f0] px-3 text-xs sm:col-span-2"
+                  />
+                  <input
+                    value={financeNeighborhood}
+                    onChange={(event) => setFinanceNeighborhood(event.target.value)}
+                    placeholder="Bairro de destino"
+                    aria-label="Filtrar por bairro de destino"
+                    className="h-10 min-w-0 rounded-xl border border-[#e2e8f0] px-3 text-xs"
+                  />
+                  <label className="text-[10px] text-[#718096]">
+                    Data inicial
+                    <input
+                      type="date"
+                      value={financeFrom}
+                      onChange={(event) => setFinanceFrom(event.target.value)}
+                      className="mt-1 block h-9 w-full rounded-lg border border-[#e2e8f0] px-2 text-xs"
+                    />
+                  </label>
+                  <label className="text-[10px] text-[#718096]">
+                    Data final
+                    <input
+                      type="date"
+                      value={financeTo}
+                      onChange={(event) => setFinanceTo(event.target.value)}
+                      className="mt-1 block h-9 w-full rounded-lg border border-[#e2e8f0] px-2 text-xs"
+                    />
+                  </label>
+                  <label className="text-[10px] text-[#718096]">
+                    Situação
+                    <select
+                      value={financeStatus}
+                      onChange={(event) => setFinanceStatus(event.target.value as typeof financeStatus)}
+                      className="mt-1 h-9 w-full rounded-lg border border-[#e2e8f0] bg-white px-2 text-xs"
+                    >
+                      <option value="all">Todas</option>
+                      <option value="COMPLETED">Concluídas</option>
+                      {Object.entries(ORDER_STATUS_LABELS).map(([status, label]) => (
+                        <option key={status} value={status}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    onClick={() => void loadFinancePage(1)}
+                    disabled={loading || Boolean(financeFrom && financeTo && financeFrom > financeTo)}
+                    className="h-10 rounded-xl bg-[#0c225a] px-3 text-xs font-bold text-white disabled:opacity-50 sm:col-span-2 xl:col-span-1"
+                  >
+                    Aplicar filtros
+                  </button>
+                </div>
+                {financeFrom && financeTo && financeFrom > financeTo && (
+                  <p role="alert" className="text-xs text-red-700">
+                    A data inicial deve ser anterior ou igual à data final.
+                  </p>
+                )}
+                <div className="hidden overflow-x-auto rounded-xl border border-[#e8edf4] md:block">
+                  <table className="w-full min-w-[860px] text-left text-xs">
+                    <thead className="bg-[#f8fafc] text-[10px] uppercase tracking-wide text-[#7b8ba1]">
+                      <tr>
+                        {["Data / entrega", "Origem", "Destino", "Bairro", "Valor registrado", "Situação"].map((label) => (
+                          <th key={label} className="px-4 py-3">{label}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {financeOrders.map((order) => (
+                        <tr key={order.id} className="border-t border-[#f1f4f8]">
+                          <td className="px-4 py-3">
+                            <b className="block font-mono text-[#102b55]">{order.publicId}</b>
+                            <span className="mt-1 block text-[#8795a8]">
+                              {new Date(order.createdAt).toLocaleString("pt-BR", { timeZone: summary.timezone })}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-[#52657f]">{address(order.pickupStreet, order.pickupNumber, order.pickupNeighborhood)}</td>
+                          <td className="px-4 py-3 text-[#52657f]">{address(order.deliveryStreet, order.deliveryNumber, order.deliveryNeighborhood)}</td>
+                          <td className="px-4 py-3 text-[#52657f]">{order.deliveryNeighborhood || "Não informado"}</td>
+                          <td className="px-4 py-3 font-bold text-[#102b55]">{formatOrderPrice(order)}</td>
+                          <td className="px-4 py-3 text-[#52657f]">{ORDER_STATUS_LABELS[order.status]}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {financeOrders.length === 0 && (
+                    <p className="p-8 text-center text-sm text-[#718096]">
+                      Nenhuma entrega com valor registrado corresponde aos filtros.
+                    </p>
+                  )}
+                </div>
+                <div className="grid gap-2 md:hidden">
+                  {financeOrders.map((order) => (
+                    <article key={order.id} className="rounded-xl border border-[#e8edf4] bg-white p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <b className="font-mono text-xs text-[#102b55]">{order.publicId}</b>
+                          <p className="mt-1 text-[10px] text-[#8795a8]">
+                            {new Date(order.createdAt).toLocaleString("pt-BR", { timeZone: summary.timezone })}
+                          </p>
+                        </div>
+                        <b className="text-sm text-[#0f3266]">{formatOrderPrice(order)}</b>
+                      </div>
+                      <p className="mt-3 text-xs text-[#52657f]">
+                        <span className="font-semibold">Origem:</span> {address(order.pickupStreet, order.pickupNumber, order.pickupNeighborhood)}
+                      </p>
+                      <p className="mt-1 text-xs text-[#52657f]">
+                        <span className="font-semibold">Destino:</span> {address(order.deliveryStreet, order.deliveryNumber, order.deliveryNeighborhood)}
+                      </p>
+                      <p className="mt-2 text-[10px] text-[#718096]">
+                        Bairro: {order.deliveryNeighborhood || "Não informado"} · {ORDER_STATUS_LABELS[order.status]}
+                      </p>
+                    </article>
+                  ))}
+                  {financeOrders.length === 0 && (
+                    <p className="rounded-xl bg-[#f8fafc] p-6 text-center text-xs text-[#718096]">
+                      Nenhuma entrega com valor registrado corresponde aos filtros.
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[#718096]">
+                  <span>
+                    {financePage.total.toLocaleString("pt-BR")} entregas com valor · página {financePage.page} de {Math.max(1, financePage.totalPages)}
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={financePage.page <= 1 || loading}
+                      onClick={() => void loadFinancePage(financePage.page - 1)}
+                      className="rounded-lg border border-[#e8edf4] bg-white px-3 py-2 disabled:opacity-40"
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      disabled={financePage.page >= financePage.totalPages || loading}
+                      onClick={() => void loadFinancePage(financePage.page + 1)}
+                      className="rounded-lg border border-[#e8edf4] bg-white px-3 py-2 disabled:opacity-40"
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                </div>
+              </section>
             </div>
           )}
 

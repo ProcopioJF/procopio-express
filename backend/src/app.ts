@@ -16,9 +16,12 @@ import {
   getIntelligenceMetrics,
   resolveIntelligenceScope,
 } from "./services/intelligence.js";
-import { getDashboardCharts } from "./services/dashboard-charts.js";
+import {
+  getDashboardCharts,
+  getNeighborhoodRanking,
+} from "./services/dashboard-charts.js";
 import { adminRouter, companyRouter } from "./routes/management.js";
-import { adminCompanyUpdateSchema, adminOrderStatusSchema, changePasswordSchema, courierOrderStatusSchema, createCompanySchema, dashboardCompanyScopeSchema, intelligenceRequestSchema, loginSchema, orderCourierAssignmentSchema, pricingRouteQuerySchema, pricingRouteSchema, pricingSchema, settingsSchema, whatsappRequestStatusSchema } from "./validation.js";
+import { adminCompanyUpdateSchema, adminOrderStatusSchema, changePasswordSchema, courierOrderStatusSchema, createCompanySchema, dashboardCompanyScopeSchema, dashboardNeighborhoodRankingQuerySchema, intelligenceRequestSchema, loginSchema, orderCourierAssignmentSchema, pricingRouteQuerySchema, pricingRouteSchema, pricingSchema, settingsSchema, whatsappRequestStatusSchema } from "./validation.js";
 
 export const app = express();
 const vercelOrigins = [process.env.VERCEL_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]
@@ -63,9 +66,14 @@ api.use("/admin", adminRouter);
 api.use("/company", companyRouter);
 async function listOrders(
   rawQuery: unknown,
-  options: { companyId?: string; allowCompanyFilter: boolean },
+  options: {
+    companyId?: string
+    allowCompanyFilter: boolean
+    pricedOnly?: boolean
+  },
 ) {
   const { query, where, skip, take } = buildOrderListQuery(rawQuery, options)
+  if (options.pricedOnly) where.price = { not: null }
   const [orders, total] = await prisma.$transaction([
     prisma.order.findMany({
       where,
@@ -336,6 +344,24 @@ api.get("/dashboard/charts", requireAuth, async (req, res, next) => {
     res.json({ charts: await getDashboardCharts(companyId) });
   } catch (e) { next(e); }
 });
+api.get("/dashboard/neighborhood-ranking", requireAuth, async (req, res, next) => {
+  try {
+    if (!req.actor || !["ADMIN", "COMPANY"].includes(req.actor.role)) throw new HttpError(403, "Acesso restrito");
+    if (req.actor.role === "COMPANY" && !req.actor.companyId) throw new HttpError(403, "Empresa não identificada");
+    const { companyId: requestedCompanyId, from, to } =
+      dashboardNeighborhoodRankingQuerySchema.parse(req.query);
+    const companyId = req.actor.role === "COMPANY"
+      ? req.actor.companyId
+      : requestedCompanyId;
+    if (req.actor.role === "ADMIN" && companyId && !await prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true },
+    })) {
+      throw new HttpError(404, "Empresa não encontrada.");
+    }
+    res.json(await getNeighborhoodRanking(companyId, from, to));
+  } catch (e) { next(e); }
+});
 api.post("/intelligence/ask", requireAuth, async (req, res, next) => {
   try {
     const access = resolveIntelligenceScope(req.actor);
@@ -371,6 +397,16 @@ api.get("/company/customers", requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 api.get("/company/orders", requireAuth, async (req, res, next) => { try { if (!req.actor || req.actor.role !== "COMPANY" || !req.actor.companyId) throw new HttpError(403, "Empresa não identificada"); res.json(await listOrders(req.query, { companyId: req.actor.companyId, allowCompanyFilter: false })); } catch (e) { next(e); } });
+api.get("/company/financial-orders", requireAuth, async (req, res, next) => {
+  try {
+    if (!req.actor || req.actor.role !== "COMPANY" || !req.actor.companyId) throw new HttpError(403, "Empresa não identificada");
+    res.json(await listOrders(req.query, {
+      companyId: req.actor.companyId,
+      allowCompanyFilter: false,
+      pricedOnly: true,
+    }));
+  } catch (e) { next(e); }
+});
 api.get("/courier/orders", requireAuth, async (req, res, next) => {
   try {
     if (!req.actor || req.actor.role !== "COURIER") throw new HttpError(403, "Acesso restrito")
