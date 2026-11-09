@@ -7,9 +7,11 @@ const DashboardCharts = lazy(() => import("./DashboardCharts"))
 export default function DashboardChartsPanel({
   data,
   audience,
+  companyScoped = false,
 }: {
   data: ApiDashboardCharts
   audience?: "company" | "admin"
+  companyScoped?: boolean
 }) {
   return (
     <Suspense
@@ -27,6 +29,7 @@ export default function DashboardChartsPanel({
       <DashboardCharts
         data={data}
         audience={audience}
+        companyScoped={companyScoped}
       />
     </Suspense>
   )

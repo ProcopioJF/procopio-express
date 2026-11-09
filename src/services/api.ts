@@ -27,6 +27,12 @@ export type ApiOrder = {
   priceTableName?: string | null
   courierId?: string | null
   courier?: { id: string; user: { name: string } } | null
+  history?: Array<{
+    id: string
+    status: ApiOrder["status"]
+    note?: string | null
+    createdAt: string
+  }>
   recipientName: string
   recipientPhone?: string | null
   companyId?: string | null
@@ -73,6 +79,11 @@ export type CreateApiOrderInput = {
   notes?: string
   branchId?: string
   pickupLocationId?: string
+  pickupCustomerId?: string
+  pickupCompanyAddress?: boolean
+  deliveryLocationId?: string
+  deliveryCustomerId?: string
+  deliveryCompanyAddress?: boolean
   costCenterId?: string
 }
 
@@ -100,7 +111,12 @@ export type ApiCompanySettings = {
   address: string
 }
 
-export type ApiPeriodSummary = { orders: number; total: number; average: number }
+export type ApiPeriodSummary = {
+  orders: number
+  pricedOrders: number
+  total: number
+  average: number
+}
 
 export type ApiDashboardSummary = {
   today: ApiPeriodSummary
@@ -114,7 +130,7 @@ export type ApiDashboardSummary = {
 export type ApiDashboardCharts = {
   recentDays: Array<{ name: string; orders: number }>
 
-  months: Array<{ name: string; orders: number; total: number }>
+  months: Array<{ name: string; orders: number; total: number | null }>
 
   hours: Array<{ hour: number; label: string; orders: number }>
 
@@ -261,6 +277,8 @@ export type ApiCompany = {
   id: string
   name: string
   document?: string | null
+  email?: string | null
+  phone?: string | null
   _count: { orders: number; users: number }
 
   monthlyOrders?: number
@@ -284,6 +302,23 @@ export type ApiBranchAddress = {
   estado?: string
   cep?: string
   complemento?: string
+}
+
+export type ApiPickupAddressSuggestion = {
+  id: string
+  source: "branch" | "customer" | "company"
+  name: string
+  unitName: string | null
+  address: {
+    rua: string
+    numero: string
+    complemento: string
+    bairro: string
+    cidade: string
+    estado: string
+    cep: string
+    coordinates?: { latitude: number; longitude: number }
+  }
 }
 
 export type ApiBranch = {
@@ -532,28 +567,37 @@ export async function getPanelOrders(
   return authorizedRequest<ApiOrderListResult>(`${path}${queryString}`, token)
 }
 
-export async function getDashboardSummary(token: string) {
+export async function getDashboardSummary(token: string, companyId?: string) {
+  const query = companyId
+    ? `?companyId=${encodeURIComponent(companyId)}`
+    : ""
   return authorizedRequest<{ summary: ApiDashboardSummary }>(
-    "/dashboard/summary",
+    `/dashboard/summary${query}`,
     token,
   )
 }
 
-export async function getDashboardCharts(token: string) {
+export async function getDashboardCharts(token: string, companyId?: string) {
+  const query = companyId
+    ? `?companyId=${encodeURIComponent(companyId)}`
+    : ""
   return authorizedRequest<{ charts: ApiDashboardCharts }>(
-    "/dashboard/charts",
+    `/dashboard/charts${query}`,
     token,
   )
 }
 
-export async function askIntelligence(token: string, question: string) {
+export async function askIntelligence(
+  token: string,
+  question: string,
+  companyId?: string,
+) {
   return authorizedRequest<{ answer: string; metrics: ApiIntelligenceMetrics }>(
     "/intelligence/ask",
     token,
     {
       method: "POST",
-
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, companyId }),
     },
   )
 }
@@ -562,6 +606,21 @@ export async function getAdminCompanies(token: string) {
   return authorizedRequest<{ companies: ApiCompany[] }>(
     "/admin/companies",
     token,
+  )
+}
+
+export async function updateAdminCompany(
+  token: string,
+  id: string,
+  updates: Pick<ApiCompany, "name" | "document" | "email" | "phone">,
+) {
+  return authorizedRequest<{ company: ApiCompany }>(
+    `/admin/companies/${encodeURIComponent(id)}`,
+    token,
+    {
+      method: "PATCH",
+      body: JSON.stringify(updates),
+    },
   )
 }
 
@@ -1153,9 +1212,12 @@ export async function updateAdminPlan(
   )
 }
 
-export async function getAdminSubscriptions(token: string) {
+export async function getAdminSubscriptions(token: string, companyId?: string) {
+  const query = companyId
+    ? `?companyId=${encodeURIComponent(companyId)}`
+    : ""
   return authorizedRequest<{ subscriptions: ApiSubscription[] }>(
-    "/admin/subscriptions",
+    `/admin/subscriptions${query}`,
     token,
   )
 }
@@ -1205,6 +1267,7 @@ export async function getAdminFinancialEntries(
     limit?: number
     search?: string
     type?: ApiFinancialEntry["type"]
+    companyId?: string
     from?: string
     to?: string
   } = {},
@@ -1214,6 +1277,7 @@ export async function getAdminFinancialEntries(
   if (query.limit != null) params.set("limit", String(query.limit))
   if (query.search) params.set("search", query.search)
   if (query.type) params.set("type", query.type)
+  if (query.companyId) params.set("companyId", query.companyId)
   if (query.from) params.set("from", query.from)
   if (query.to) params.set("to", query.to)
   const queryString = params.size > 0 ? `?${params.toString()}` : ""
@@ -1224,9 +1288,12 @@ export async function getAdminFinancialEntries(
   )
 }
 
-export async function getAdminFinancialSummary(token: string) {
+export async function getAdminFinancialSummary(token: string, companyId?: string) {
+  const query = companyId
+    ? `?companyId=${encodeURIComponent(companyId)}`
+    : ""
   return authorizedRequest<{ months: ApiFinancialMonth[] }>(
-    "/admin/financial-summary",
+    `/admin/financial-summary${query}`,
     token,
   )
 }
@@ -1319,6 +1386,17 @@ export async function getCompanyOrganization(token: string) {
   )
 }
 
+export async function searchCompanyPickupAddresses(
+  token: string,
+  query: string,
+) {
+  const params = new URLSearchParams({ q: query })
+  return authorizedRequest<{ suggestions: ApiPickupAddressSuggestion[] }>(
+    `/company/pickup-addresses?${params.toString()}`,
+    token,
+  )
+}
+
 export async function createCompanyMember(
   token: string,
   member: {
@@ -1326,7 +1404,10 @@ export async function createCompanyMember(
     email: string
     phone?: string
     password: string
-    companyPermission?: NonNullable<ApiUser["companyPermission"]>
+    companyPermission?: Exclude<
+      NonNullable<ApiUser["companyPermission"]>,
+      "ADMIN"
+    >
   },
 ) {
   return authorizedRequest<{ member: ApiCompanyMember }>(
@@ -1345,7 +1426,10 @@ export async function updateCompanyMember(
   id: string,
   updates: {
     isActive?: boolean
-    companyPermission?: NonNullable<ApiUser["companyPermission"]>
+    companyPermission?: Exclude<
+      NonNullable<ApiUser["companyPermission"]>,
+      "ADMIN"
+    >
   },
 ) {
   return authorizedRequest<{ member: ApiCompanyMember }>(

@@ -4,9 +4,11 @@ import { z } from "zod";
 import {
   companyBranchSchema,
   companyBranchPickupAddressSchema,
+  companyPickupAddressQuerySchema,
   companyCostCenterSchema,
   companyMemberSchema,
   companyMemberUpdateSchema,
+  dashboardCompanyScopeSchema,
   financialEntryListQuerySchema,
   financialEntrySchema,
   leadSchema,
@@ -31,7 +33,6 @@ import { prisma } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
 import { HttpError } from "../middleware/errors.js";
 import { normalizeName } from "../services/normalization.js";
-import { companySettingsSchema } from "../validation.js";
 
 const adminRouter = express.Router();
 const companyRouter = express.Router();
@@ -142,8 +143,10 @@ adminRouter.patch("/plans/:id", route(async (req, res) => {
   res.json({ plan });
 }));
 
-adminRouter.get("/subscriptions", route(async (_req, res) => {
+adminRouter.get("/subscriptions", route(async (req, res) => {
+  const { companyId } = dashboardCompanyScopeSchema.parse(req.query);
   const subscriptions = await prisma.subscription.findMany({
+    ...(companyId ? { where: { companyId } } : {}),
     orderBy: [{ status: "asc" }, { startedAt: "desc" }],
     include: { company: { select: { id: true, name: true } }, plan: { select: { id: true, name: true } } },
   });
@@ -203,9 +206,10 @@ adminRouter.patch("/subscriptions/:id", route(async (req, res) => {
 }));
 
 adminRouter.get("/financial-entries", route(async (req, res) => {
-  const { offset, limit, search, type, from, to } = financialEntryListQuerySchema.parse(req.query);
+  const { offset, limit, search, type, companyId, from, to } = financialEntryListQuerySchema.parse(req.query);
   const where: Prisma.FinancialEntryWhereInput = {
     ...(type ? { type } : {}),
+    ...(companyId ? { companyId } : {}),
     ...(from || to ? {
       occurredAt: {
         ...(from ? { gte: new Date(`${from}T03:00:00.000Z`) } : {}),
@@ -248,7 +252,8 @@ adminRouter.post("/financial-entries", route(async (req, res) => {
   res.status(201).json({ entry });
 }));
 
-adminRouter.get("/financial-summary", route(async (_req, res) => {
+adminRouter.get("/financial-summary", route(async (req, res) => {
+  const { companyId } = dashboardCompanyScopeSchema.parse(req.query);
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Sao_Paulo",
@@ -259,7 +264,10 @@ adminRouter.get("/financial-summary", route(async (_req, res) => {
   const month = Number(parts.find((part) => part.type === "month")?.value);
   const start = new Date(Date.UTC(year, month - 6, 1, 3));
   const entries = await prisma.financialEntry.findMany({
-    where: { occurredAt: { gte: start, lt: new Date(Date.UTC(year, month, 1, 3)) } },
+    where: {
+      ...(companyId ? { companyId } : {}),
+      occurredAt: { gte: start, lt: new Date(Date.UTC(year, month, 1, 3)) },
+    },
     select: { type: true, amount: true, occurredAt: true },
   });
   const totals = new Map<string, { month: string; income: number; expenses: number }>();
@@ -703,31 +711,106 @@ companyRouter.get("/organization", route(async (req, res) => {
   });
 }));
 
-companyRouter.put("/settings", route(async (req, res) => {
-  const id = await requireCompanyAdmin(req);
-  const data = companySettingsSchema.parse(req.body);
-  const addressText = data.address.trim();
-  const company = await prisma.company.update({
-    where: { id },
-    data: {
-      name: data.name,
-      document: data.document || null,
-      phone: data.phone || null,
-      email: data.email || null,
-      address: { text: addressText, pickupAddress: data.pickupAddress },
-    },
-  });
-  await audit(req, "UPDATE", "Company", id);
-  res.json({
-    settings: {
-      name: company.name,
-      document: company.document ?? "",
-      phone: company.phone ?? "",
-      email: company.email ?? "",
-      address: addressText,
-      pickupAddress: data.pickupAddress,
-    },
-  });
+companyRouter.get("/pickup-addresses", route(async (req, res) => {
+  const id = companyId(req);
+  const { q } = companyPickupAddressQuerySchema.parse(req.query);
+  const search = normalizeName(q);
+  const accents = "áàãâäéèêëíìîïóòõôöúùûüç";
+  const replacements = "aaaaaeeeeiiiiooooouuuuc";
+  type PickupAddressRow = {
+    id: string;
+    name: string;
+    unitName: string | null;
+    source: "branch" | "customer" | "company";
+    address: Prisma.JsonValue | null;
+  };
+
+  const [branches, customers, companies] = await Promise.all([
+    prisma.$queryRaw<PickupAddressRow[]>`
+      SELECT branch."id", company."name", branch."name" AS "unitName",
+        'branch'::text AS "source", branch."address"
+      FROM "CompanyBranch" AS branch
+      JOIN "Company" AS company ON company."id" = branch."companyId"
+      WHERE branch."companyId" = ${id}
+        AND branch."isActive" = true
+        AND (
+          position(${search} in translate(lower(branch."name"), ${accents}, ${replacements})) > 0
+          OR position(${search} in translate(lower(company."name"), ${accents}, ${replacements})) > 0
+          OR position(${search} in translate(lower(coalesce(branch."address" ->> 'rua', '')), ${accents}, ${replacements})) > 0
+          OR position(${search} in translate(lower(coalesce(branch."address" ->> 'bairro', '')), ${accents}, ${replacements})) > 0
+          OR position(${search} in translate(lower(coalesce(branch."address" ->> 'cidade', '')), ${accents}, ${replacements})) > 0
+        )
+      ORDER BY branch."name" ASC
+      LIMIT 20
+    `,
+    prisma.$queryRaw<PickupAddressRow[]>`
+      SELECT customer."id", customer."name", NULL::text AS "unitName",
+        'customer'::text AS "source", customer."address"
+      FROM "Customer" AS customer
+      WHERE customer."companyId" = ${id}
+        AND (
+          position(${search} in translate(lower(customer."name"), ${accents}, ${replacements})) > 0
+          OR position(${search} in translate(lower(coalesce(customer."address" ->> 'rua', '')), ${accents}, ${replacements})) > 0
+          OR position(${search} in translate(lower(coalesce(customer."address" ->> 'bairro', '')), ${accents}, ${replacements})) > 0
+          OR position(${search} in translate(lower(coalesce(customer."address" ->> 'cidade', '')), ${accents}, ${replacements})) > 0
+        )
+      ORDER BY customer."updatedAt" DESC, customer."name" ASC
+      LIMIT 20
+    `,
+    prisma.$queryRaw<PickupAddressRow[]>`
+      SELECT company."id", company."name", 'Sede'::text AS "unitName",
+        'company'::text AS "source", company."address" -> 'pickupAddress' AS "address"
+      FROM "Company" AS company
+      WHERE company."id" = ${id}
+        AND (
+          position(${search} in translate(lower(company."name"), ${accents}, ${replacements})) > 0
+          OR position(${search} in translate(lower(coalesce(company."address" -> 'pickupAddress' ->> 'rua', '')), ${accents}, ${replacements})) > 0
+          OR position(${search} in translate(lower(coalesce(company."address" -> 'pickupAddress' ->> 'bairro', '')), ${accents}, ${replacements})) > 0
+          OR position(${search} in translate(lower(coalesce(company."address" -> 'pickupAddress' ->> 'cidade', '')), ${accents}, ${replacements})) > 0
+        )
+      LIMIT 1
+    `,
+  ]);
+
+  const toAddress = (value: Prisma.JsonValue | null) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const address = value as Prisma.JsonObject;
+    const stringField = (key: string) =>
+      typeof address[key] === "string" ? address[key] as string : "";
+    const coordinates = address.coordinates;
+    const validCoordinates = coordinates && typeof coordinates === "object" && !Array.isArray(coordinates)
+      ? coordinates as Prisma.JsonObject
+      : null;
+    const latitude = validCoordinates?.latitude;
+    const longitude = validCoordinates?.longitude;
+    return {
+      rua: stringField("rua"),
+      numero: stringField("numero"),
+      complemento: stringField("complemento"),
+      bairro: stringField("bairro"),
+      cidade: stringField("cidade"),
+      estado: stringField("estado"),
+      cep: stringField("cep"),
+      ...(typeof latitude === "number" && typeof longitude === "number"
+        ? { coordinates: { latitude, longitude } }
+        : {}),
+    };
+  };
+
+  const suggestions = [...branches, ...customers, ...companies]
+    .map((row) => ({ ...row, address: toAddress(row.address) }))
+    .filter((row) => row.address?.rua && row.address.numero && row.address.bairro)
+    .sort((left, right) =>
+      left.name.localeCompare(right.name, "pt-BR") ||
+      (left.unitName ?? "").localeCompare(right.unitName ?? "", "pt-BR"),
+    )
+    .slice(0, 15);
+
+  res.json({ suggestions });
+}));
+
+companyRouter.put("/settings", route(async () => {
+  throw new HttpError(403, "Os dados cadastrais da empresa só podem ser alterados pela administração do Procópio Express.");
 }));
 
 companyRouter.post("/members", route(async (req, res) => {
@@ -775,10 +858,12 @@ companyRouter.patch("/members/:id", route(async (req, res) => {
       where: { id: targetId, companyId: id, role: { name: "COMPANY" } },
     });
     if (!target) throw new HttpError(404, "Usuário não encontrado nesta empresa");
-    if (target.id === req.actor!.id && (data.isActive === false || data.companyPermission === "RESTRICTED" || data.companyPermission === "STANDARD")) {
+    if (target.id === req.actor!.id && (data.isActive === false || data.companyPermission !== undefined)) {
       throw new HttpError(400, "Não é possível remover sua própria permissão de administrador");
     }
-    const removingAdmin = target.companyPermission === "ADMIN" && (data.isActive === false || (data.companyPermission && data.companyPermission !== "ADMIN"));
+    const removingAdmin = target.companyPermission === "ADMIN" && (
+      data.isActive === false || data.companyPermission !== undefined
+    );
     if (removingAdmin) {
       const adminCount = await tx.user.count({
         where: { companyId: id, isActive: true, companyPermission: "ADMIN", role: { name: "COMPANY" } },

@@ -55,12 +55,6 @@ export default function CompanyOrganizationPanel({
 
   profile,
 
-  savingProfile,
-
-  onProfileChange,
-
-  onSaveProfile,
-
   onFeedback,
 }: {
   token: string
@@ -68,12 +62,6 @@ export default function CompanyOrganizationPanel({
   user: ApiUser
 
   profile: ApiCompanySettings
-
-  savingProfile: boolean
-
-  onProfileChange: (profile: ApiCompanySettings) => void
-
-  onSaveProfile: () => void
 
   onFeedback: (error: string, notice?: string) => void
 }) {
@@ -93,7 +81,10 @@ export default function CompanyOrganizationPanel({
     email: "",
     phone: "",
     password: "",
-    companyPermission: "STANDARD" as NonNullable<ApiUser["companyPermission"]>,
+    companyPermission: "STANDARD" as Exclude<
+      NonNullable<ApiUser["companyPermission"]>,
+      "ADMIN"
+    >,
   })
 
   const [branchForm, setBranchForm] = useState(emptyBranchForm)
@@ -341,25 +332,14 @@ export default function CompanyOrganizationPanel({
                   key={key}
                   label={label}
                   value={profile[key]}
-                  onChange={(event) =>
-                    onProfileChange({ ...profile, [key]: event.target.value })
-                  }
+                  readOnly
                 />
               ))}
             </div>
-            {canManage ? (
-              <button
-                disabled={savingProfile}
-                onClick={onSaveProfile}
-                className="mt-5 rounded-xl bg-[#0c225a] px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
-              >
-                {savingProfile ? "Salvando…" : "Salvar perfil"}
-              </button>
-            ) : (
-              <p className="mt-5 text-xs text-[#718096]">
-                Somente administradores da empresa podem alterar o cadastro.
-              </p>
-            )}
+            <p className="mt-5 text-xs text-[#718096]">
+              Para solicitar alteração dos dados cadastrais, entre em contato
+              com a administração do Procópio Express.
+            </p>
           </div>
           <div className="space-y-4">
             <div className="rounded-2xl border border-[#e8edf4] bg-white p-5">
@@ -504,12 +484,14 @@ export default function CompanyOrganizationPanel({
                     setMemberForm({
                       ...memberForm,
                       companyPermission: event.target
-                        .value as NonNullable<ApiUser["companyPermission"]>,
+                        .value as Exclude<
+                        NonNullable<ApiUser["companyPermission"]>,
+                        "ADMIN"
+                      >,
                     })
                   }
                   className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-sm"
                 >
-                  <option value="ADMIN">Administrador</option>
                   <option value="STANDARD">Padrão</option>
                   <option value="RESTRICTED">Restrito</option>
                 </select>
@@ -550,7 +532,7 @@ export default function CompanyOrganizationPanel({
                     <td className="px-4 py-3">{item.email}</td>
                     <td className="px-4 py-3">
                       {item.companyPermission === "ADMIN"
-                        ? "Administrador"
+                        ? "Administrador da empresa"
                         : item.companyPermission === "RESTRICTED"
                           ? "Restrito"
                           : "Padrão"}
@@ -561,26 +543,30 @@ export default function CompanyOrganizationPanel({
                     <td className="px-4 py-3">
                       {canManage && item.id !== user.id && (
                         <div className="flex gap-2">
-                          <select
-                            disabled={saving || !item.isActive}
-                            value={item.companyPermission ?? "STANDARD"}
-                            aria-label={`Permissão de ${item.name}`}
-                            onChange={(event) =>
-                              void run(
-                                () =>
-                                  updateCompanyMember(token, item.id, {
-                                    companyPermission: event.target
-                                      .value as NonNullable<ApiUser["companyPermission"]>,
-                                  }),
-                                "Permissão atualizada.",
-                              )
-                            }
-                            className="rounded-lg border border-[#e8edf4] px-2 py-1"
-                          >
-                            <option value="ADMIN">Administrador</option>
-                            <option value="STANDARD">Padrão</option>
-                            <option value="RESTRICTED">Restrito</option>
-                          </select>
+                          {item.companyPermission !== "ADMIN" && (
+                            <select
+                              disabled={saving || !item.isActive}
+                              value={item.companyPermission ?? "STANDARD"}
+                              aria-label={`Permissão de ${item.name}`}
+                              onChange={(event) =>
+                                void run(
+                                  () =>
+                                    updateCompanyMember(token, item.id, {
+                                      companyPermission: event.target
+                                        .value as Exclude<
+                                        NonNullable<ApiUser["companyPermission"]>,
+                                        "ADMIN"
+                                      >,
+                                    }),
+                                  "Permissão atualizada.",
+                                )
+                              }
+                              className="rounded-lg border border-[#e8edf4] px-2 py-1"
+                            >
+                              <option value="STANDARD">Padrão</option>
+                              <option value="RESTRICTED">Restrito</option>
+                            </select>
+                          )}
                           <button
                             disabled={saving}
                             onClick={() =>

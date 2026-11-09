@@ -55,6 +55,14 @@ export const intelligenceQuestionSchema = z.object({
   question: z.string().trim().min(1, "Informe uma pergunta").max(500),
 })
 
+export const intelligenceRequestSchema = intelligenceQuestionSchema.extend({
+  companyId: z.string().trim().min(1).max(120).optional(),
+})
+
+export const dashboardCompanyScopeSchema = z.object({
+  companyId: z.string().trim().min(1).max(120).optional(),
+})
+
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, "Informe sua senha atual"),
 
@@ -109,6 +117,8 @@ export const financialEntryListQuerySchema = z
     search: z.string().trim().max(120).default(""),
 
     type: z.enum(["INCOME", "EXPENSE"]).optional(),
+
+    companyId: z.string().trim().min(1).max(120).optional(),
 
     from: dateOnlySchema.optional(),
 
@@ -286,16 +296,32 @@ export const companyMemberSchema = z.object({
 
   password: z.string().min(12).max(100),
 
-  companyPermission: z
-    .enum(["ADMIN", "STANDARD", "RESTRICTED"])
-    .default("STANDARD"),
+  companyPermission: z.enum(["STANDARD", "RESTRICTED"]).default("STANDARD"),
 })
+
+export const adminCompanyUpdateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    document: z.string().trim().max(30).nullable().optional(),
+    phone: nullableText(30),
+    email: z
+      .string()
+      .trim()
+      .email()
+      .max(254)
+      .nullable()
+      .optional()
+      .or(z.literal("")),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Informe ao menos um campo para atualizar.",
+  })
 
 export const companyMemberUpdateSchema = z
   .object({
     isActive: z.boolean().optional(),
 
-    companyPermission: z.enum(["ADMIN", "STANDARD", "RESTRICTED"]).optional(),
+    companyPermission: z.enum(["STANDARD", "RESTRICTED"]).optional(),
   })
   .refine(
     (value) =>
@@ -310,6 +336,10 @@ export const companyBranchPickupAddressSchema = z.object({
   estado: z.string().trim().length(2).transform((value) => value.toUpperCase()),
   cep: z.string().trim().regex(/^\d{8}$/).optional(),
   complemento: z.string().trim().max(200).optional(),
+})
+
+export const companyPickupAddressQuerySchema = z.object({
+  q: z.string().trim().min(2).max(80),
 })
 
 export const companyBranchSchema = z.object({
@@ -391,7 +421,38 @@ export const createOrderSchema = z.object({
 
   branchId: z.string().optional(),
   pickupLocationId: z.string().trim().min(1).max(120).optional(),
+  pickupCustomerId: z.string().trim().min(1).max(120).optional(),
+  pickupCompanyAddress: z.boolean().optional(),
+  deliveryLocationId: z.string().trim().min(1).max(120).optional(),
+  deliveryCustomerId: z.string().trim().min(1).max(120).optional(),
+  deliveryCompanyAddress: z.boolean().optional(),
   costCenterId: z.string().optional(),
+}).superRefine((order, context) => {
+  const pickupAddressSources = [
+    order.pickupLocationId,
+    order.pickupCustomerId,
+    order.pickupCompanyAddress ? "company" : undefined,
+  ].filter(Boolean)
+  const deliveryAddressSources = [
+    order.deliveryLocationId,
+    order.deliveryCustomerId,
+    order.deliveryCompanyAddress ? "company" : undefined,
+  ].filter(Boolean)
+
+  if (pickupAddressSources.length > 1) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["pickupLocationId"],
+      message: "Selecione apenas uma origem de endereço salvo.",
+    })
+  }
+  if (deliveryAddressSources.length > 1) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["deliveryLocationId"],
+      message: "Selecione apenas um destino de endereço salvo.",
+    })
+  }
 })
 
 export const pricingSchema = z.object({

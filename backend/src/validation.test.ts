@@ -4,13 +4,18 @@ import { describe, it } from "node:test"
 
 import {
   addressSchema,
+  adminCompanyUpdateSchema,
   adminOrderStatusSchema,
   companyBranchPickupAddressSchema,
+  companyPickupAddressQuerySchema,
   companyBranchSchema,
+  companyMemberSchema,
+  companyMemberUpdateSchema,
   createOrderSchema,
   createCompanySchema,
   changePasswordSchema,
   courierOrderStatusSchema,
+  dashboardCompanyScopeSchema,
   financialEntryListQuerySchema,
   financialEntrySchema,
   leadSchema,
@@ -21,6 +26,71 @@ import {
   systemUserPasswordResetSchema,
   systemUserSchema,
 } from "./validation.js"
+import { normalizeName } from "./services/normalization.js"
+
+describe("admin dashboard company context", () => {
+  it("accepts an optional company scope and rejects empty identifiers", () => {
+    assert.deepEqual(dashboardCompanyScopeSchema.parse({}), {})
+    assert.deepEqual(
+      dashboardCompanyScopeSchema.parse({ companyId: "company-a" }),
+      { companyId: "company-a" },
+    )
+    assert.equal(
+      dashboardCompanyScopeSchema.safeParse({ companyId: "" }).success,
+      false,
+    )
+  })
+})
+
+describe("company member permissions", () => {
+  const member = {
+    name: "Pessoa da empresa",
+    email: "pessoa@empresa.com",
+    password: "senha-segura-123",
+  }
+
+  it("allows creating standard and restricted users but not company administrators", () => {
+    assert.equal(companyMemberSchema.parse(member).companyPermission, "STANDARD")
+    assert.equal(
+      companyMemberSchema.parse({
+        ...member,
+        companyPermission: "RESTRICTED",
+      }).companyPermission,
+      "RESTRICTED",
+    )
+    assert.equal(
+      companyMemberSchema.safeParse({
+        ...member,
+        companyPermission: "ADMIN",
+      }).success,
+      false,
+    )
+  })
+
+  it("prevents company users from granting administrator permission", () => {
+    assert.equal(
+      companyMemberUpdateSchema.safeParse({ companyPermission: "ADMIN" })
+        .success,
+      false,
+    )
+    assert.equal(
+      companyMemberUpdateSchema.safeParse({ companyPermission: "STANDARD" })
+        .success,
+      true,
+    )
+  })
+})
+
+describe("admin company profile updates", () => {
+  it("accepts limited company data updates and rejects empty updates", () => {
+    assert.equal(
+      adminCompanyUpdateSchema.safeParse({ name: "Shape Suplementos" })
+        .success,
+      true,
+    )
+    assert.equal(adminCompanyUpdateSchema.safeParse({}).success, false)
+  })
+})
 
 describe("saved company pickup address validation", () => {
   const address = {
@@ -70,6 +140,74 @@ describe("saved company pickup address validation", () => {
       }).success,
       true,
     )
+  })
+
+  it("accepts each saved pickup source but rejects ambiguous selections", () => {
+    const order = {
+      pickupAddress: address,
+      deliveryAddress: address,
+      recipientName: "Destinatário",
+      recipientPhone: "32999990000",
+      requesterName: "Solicitante",
+      requesterPhone: "32988887777",
+    }
+
+    assert.equal(
+      createOrderSchema.safeParse({ ...order, pickupCustomerId: "customer-1" }).success,
+      true,
+    )
+    assert.equal(
+      createOrderSchema.safeParse({ ...order, pickupCompanyAddress: true }).success,
+      true,
+    )
+    assert.equal(
+      createOrderSchema.safeParse({
+        ...order,
+        pickupLocationId: "branch-1",
+        pickupCustomerId: "customer-1",
+      }).success,
+      false,
+    )
+  })
+
+  it("accepts each saved delivery source but rejects ambiguous selections", () => {
+    const order = {
+      pickupAddress: address,
+      deliveryAddress: address,
+      recipientName: "Destinatário",
+      recipientPhone: "32999990000",
+      requesterName: "Solicitante",
+      requesterPhone: "32988887777",
+    }
+
+    assert.equal(
+      createOrderSchema.safeParse({ ...order, deliveryLocationId: "branch-1" }).success,
+      true,
+    )
+    assert.equal(
+      createOrderSchema.safeParse({ ...order, deliveryCustomerId: "customer-1" }).success,
+      true,
+    )
+    assert.equal(
+      createOrderSchema.safeParse({ ...order, deliveryCompanyAddress: true }).success,
+      true,
+    )
+    assert.equal(
+      createOrderSchema.safeParse({
+        ...order,
+        deliveryLocationId: "branch-1",
+        deliveryCustomerId: "customer-1",
+      }).success,
+      false,
+    )
+  })
+
+  it("requires at least two characters for a pickup address search", () => {
+    assert.deepEqual(companyPickupAddressQuerySchema.parse({ q: " SH " }), {
+      q: "SH",
+    })
+    assert.equal(companyPickupAddressQuerySchema.safeParse({ q: "S" }).success, false)
+    assert.equal(normalizeName("  SHÁPE   Suplementos "), "shape suplementos")
   })
 })
 
@@ -315,6 +453,7 @@ describe("financial entry list pagination", () => {
       financialEntryListQuerySchema.parse({
         search: "  mensalidade ",
         type: "INCOME",
+        companyId: "company_123",
         from: "2025-03-01",
         to: "2025-03-31",
       }),
@@ -323,6 +462,7 @@ describe("financial entry list pagination", () => {
         limit: 100,
         search: "mensalidade",
         type: "INCOME",
+        companyId: "company_123",
         from: "2025-03-01",
         to: "2025-03-31",
       },

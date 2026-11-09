@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client"
 import { prisma } from "../db.js"
 
 type CountRow = { bucket: string; orders: bigint | number }
-type MonthRow = CountRow & { total: number | null }
+type MonthRow = CountRow & { total: number | null; pricedOrders: number }
 type HourRow = { hour: number; orders: bigint | number }
 type NameCountRow = { name: string; orders: bigint | number }
 
@@ -31,6 +31,13 @@ function monthLabel(key: string) {
   })
     .format(new Date(Date.UTC(year, month - 1, 1)))
     .replace(".", "")
+}
+
+export function monthlyRecordedValue(
+  total: number | null,
+  pricedOrders: number,
+) {
+  return pricedOrders > 0 ? Number(total ?? 0) : null
 }
 
 export async function getDashboardCharts(companyId?: string) {
@@ -68,6 +75,7 @@ export async function getDashboardCharts(companyId?: string) {
       prisma.$queryRaw<MonthRow[]>(Prisma.sql`
         SELECT TO_CHAR(DATE_TRUNC('month', "createdAt" AT TIME ZONE 'America/Sao_Paulo'), 'YYYY-MM') AS bucket,
                COUNT(*)::int AS orders,
+               COUNT(price)::int AS "pricedOrders",
                COALESCE(SUM(price), 0)::double precision AS total
         FROM "Order"
         WHERE "createdAt" >= ${monthRangeStart} AND "createdAt" <= ${now} ${scope}
@@ -108,7 +116,9 @@ export async function getDashboardCharts(companyId?: string) {
     return {
       name: monthLabel(key),
       orders: Number(row?.orders ?? 0),
-      total: Number(row?.total ?? 0),
+      total: row
+        ? monthlyRecordedValue(row.total, Number(row.pricedOrders))
+        : null,
     }
   })
   const sortedNeighborhoods = neighborhoodRows

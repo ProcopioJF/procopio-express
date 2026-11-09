@@ -64,10 +64,13 @@ function ChartCard({
 export default function DashboardCharts({
   data,
   audience = "company",
+  companyScoped = false,
 }: {
   data: ApiDashboardCharts
   audience?: "company" | "admin"
+  companyScoped?: boolean
 }) {
+  const showCompanyVolume = audience === "admin" && !companyScoped
   const [selectedChart, setSelectedChart] = useState<ChartSelection>("daily")
   const chartAxis = {
     fontSize: 10,
@@ -105,7 +108,7 @@ export default function DashboardCharts({
           <option value="daily">Entregas por dia</option>
           <option value="monthlyValue">Valores registrados por mês</option>
           <option value="distribution">
-            {audience === "admin" ? "Volume por empresa" : "Volume por bairro"}
+            {showCompanyVolume ? "Volume por empresa" : "Volume por bairro"}
           </option>
           <option value="monthlyOrders">Pedidos por mês</option>
           <option value="hourly">Volume por horário</option>
@@ -149,36 +152,45 @@ export default function DashboardCharts({
           detail="Todo o histórico · últimos 6 meses"
           className={selectedChart === "monthlyValue" ? "" : "hidden md:block"}
         >
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart
-              data={data.months}
-              margin={{ top: 8, right: 4, left: -12, bottom: 0 }}
-            >
-              <CartesianGrid stroke="#e9eff5" vertical={false} />
-              <XAxis dataKey="name" tick={chartAxis} />
-              <YAxis tick={chartAxis} />
-              <Tooltip
-                {...tooltipStyle}
-                formatter={(value) => money(Number(value ?? 0))}
-              />
-              <Bar
-                dataKey="total"
-                name="Valor registrado"
-                fill="#ff7a18"
-                radius={[5, 5, 0, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+          {data.months.every((item) => item.total === null) ? (
+            <p className="py-10 text-center text-xs text-[#8795a8]">
+              Não há valores registrados para os últimos seis meses.
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart
+                data={data.months}
+                margin={{ top: 8, right: 4, left: -12, bottom: 0 }}
+              >
+                <CartesianGrid stroke="#e9eff5" vertical={false} />
+                <XAxis dataKey="name" tick={chartAxis} />
+                <YAxis tick={chartAxis} />
+                <Tooltip
+                  {...tooltipStyle}
+                  formatter={(value) =>
+                    value == null ? "Sem valores registrados" : money(Number(value))
+                  }
+                />
+                <Bar
+                  dataKey="total"
+                  name="Valor registrado"
+                  fill="#ff7a18"
+                  radius={[5, 5, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </ChartCard>
 
         <ChartCard
           title={
-            audience === "admin" ? "Volume por empresa" : "Volume por bairro"
+            showCompanyVolume ? "Volume por empresa" : "Volume por bairro"
           }
           detail="Todo o histórico"
           className={selectedChart === "distribution" ? "" : "hidden md:block"}
         >
-          {audience === "admin" && data.companyVolume.length > 0 ? (
+          {showCompanyVolume ? (
+            data.companyVolume.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>
               <BarChart
                 data={data.companyVolume}
@@ -202,6 +214,11 @@ export default function DashboardCharts({
                 />
               </BarChart>
             </ResponsiveContainer>
+            ) : (
+              <p className="py-10 text-center text-xs text-[#8795a8]">
+                Nenhuma entrega registrada no período.
+              </p>
+            )
           ) : data.neighborhoods.length > 0 ? (
             <div className="flex items-center gap-2">
               <ResponsiveContainer width="58%" height={220}>

@@ -229,6 +229,13 @@ controlado; não crie pedidos artificiais na Production.
 7. No modo inicial, o pedido é salvo e a interface abre o WhatsApp com a
    mensagem preenchida; a pessoa responsável confere os dados e toca em Enviar.
 
+Na solicitação feita por uma empresa autenticada, o campo de busca da coleta
+localiza clientes, sede e filiais cadastrados para aquela própria empresa. A
+busca ignora maiúsculas/minúsculas e acentos; ao selecionar uma sugestão,
+preenche os dados disponíveis e permite edição manual. Visitantes e pedidos sem
+sessão empresarial continuam informando a coleta manualmente. A busca exige
+autenticação e nunca consulta endereços de outras empresas.
+
 O nome e o telefone do solicitante são armazenados separadamente dos dados do
 destinatário e aparecem nas listas/relatórios. A migration
 `20261001003000_order_requester_and_notification_status` adiciona esses campos

@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { MapPin, Phone, User, Home, ChevronRight, ChevronLeft, Check, Package, Navigation, MessageCircle, Building2, ArrowRight } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Building2, Check, ChevronRight, Home, MapPin, MessageCircle, Navigation, Package, Pencil, Phone, User, type LucideIcon } from 'lucide-react'
 import Logo from '../components/Logo'
 import { emptyAddress as newStructuredAddress, geocodeAddress, isValidOptionalCep, lookupCep } from '../services/address'
-import { createPublicOrder, formatOrderPrice, getCompanyOrganization, getPublicSettings, getRoutePrice, type ApiDeliveryPrice, type ApiOrganization } from '../services/api'
+import { createPublicOrder, formatOrderPrice, getCompanyOrganization, getPublicSettings, getRoutePrice, searchCompanyPickupAddresses, type ApiDeliveryPrice, type ApiOrganization, type ApiPickupAddressSuggestion } from '../services/api'
 
 const DeliveryMap = lazy(() =>
   import('../components/DeliveryMap').then(({ DeliveryMap: Component }) => ({ default: Component })),
@@ -51,10 +51,10 @@ function isValidPhone(value: string) {
 }
 
 function InputField({
-  label, value, onChange, placeholder, icon: Icon, type = 'text', required, helperText, error
+  label, value, onChange, placeholder, icon: Icon, type = 'text', required, helperText, error, inputMode
 }: {
   label: string; value: string; onChange: (v: string) => void
-  placeholder?: string; icon?: any; type?: string; required?: boolean; helperText?: string; error?: string
+  placeholder?: string; icon?: LucideIcon; type?: string; required?: boolean; helperText?: string; error?: string; inputMode?: 'text' | 'numeric' | 'tel'
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -69,6 +69,7 @@ function InputField({
         )}
         <input
           type={type}
+          inputMode={inputMode}
           value={value}
           onChange={e => onChange(e.target.value)}
           placeholder={placeholder}
@@ -112,13 +113,11 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
 function ResponsiveDeliveryMap({
   pickup,
   delivery,
-  className = '',
 }: {
   pickup?: { latitude: number; longitude: number }
   delivery?: { latitude: number; longitude: number }
-  className?: string
 }) {
-  const [isOpen, setIsOpen] = useState(true)
+  const [isOpen, setIsOpen] = useState(false)
   const [isDesktop, setIsDesktop] = useState(() =>
     window.matchMedia('(min-width: 1024px)').matches,
   )
@@ -132,8 +131,20 @@ function ResponsiveDeliveryMap({
 
   return (
     <>
-      <div className={`hidden overflow-hidden rounded-2xl border border-[#e2e8f0] shadow-sm lg:block ${className}`}>
-        {isDesktop && (
+      <div className={`hidden overflow-hidden rounded-2xl border border-[#e2e8f0] bg-white shadow-sm lg:block ${isOpen ? 'h-[280px]' : 'h-12'}`}>
+        <button
+          type="button"
+          aria-expanded={isOpen}
+          onClick={() => setIsOpen(open => !open)}
+          className="flex min-h-11 w-full items-center justify-between gap-3 px-4 text-left text-xs font-semibold text-[#0f3266]"
+        >
+          <span className="flex items-center gap-2">
+            <MapPin size={15} className="text-[#ff7a18}"/>
+            {isOpen ? 'Ocultar mapa da rota' : 'Ver mapa da rota'}
+          </span>
+          <ChevronRight size={15} className={`transition-transform ${isOpen ? 'rotate-90' : ''}`}/>
+        </button>
+        {isDesktop && isOpen && (
           <Suspense fallback={<div className="h-full min-h-0 bg-[#eff7fc]" />}>
             <DeliveryMap pickup={pickup} delivery={delivery}/>
           </Suspense>
@@ -156,7 +167,7 @@ function ResponsiveDeliveryMap({
           />
         </button>
         {!isDesktop && isOpen && (
-          <div className="h-[320px] border-t border-[#e5eaf0]">
+          <div className="h-[220px] border-t border-[#e5eaf0] sm:h-[280px]">
             <Suspense fallback={<div className="h-full bg-[#eff7fc]" />}>
               <DeliveryMap pickup={pickup} delivery={delivery}/>
             </Suspense>
@@ -164,6 +175,43 @@ function ResponsiveDeliveryMap({
         )}
       </div>
     </>
+  )
+}
+
+function AddressFields({
+  value,
+  onChange,
+  cepLoading,
+  cepError,
+}: {
+  value: AddressForm
+  onChange: (field: keyof AddressForm, value: string) => void
+  cepLoading: boolean
+  cepError: string
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <div className="col-span-2 sm:col-span-1">
+        <InputField
+          label="CEP (opcional)"
+          value={value.cep}
+          onChange={next => onChange('cep', formatCep(next))}
+          placeholder="36000-000"
+          inputMode="numeric"
+          helperText={cepLoading ? 'Consultando CEP…' : undefined}
+          error={cepError || (value.cep && !isValidOptionalCep(value.cep) ? 'Informe os 8 dígitos ou deixe em branco.' : undefined)}
+        />
+      </div>
+      <InputField label="Número" value={value.number} onChange={next => onChange('number', next)} placeholder="123" icon={Home} required/>
+      <div className="col-span-2">
+        <InputField label="Rua / Avenida" value={value.street} onChange={next => onChange('street', next)} placeholder="Rua Halfeld" required/>
+      </div>
+      <InputField label="Bairro" value={value.neighborhood} onChange={next => onChange('neighborhood', next)} placeholder="Centro" required/>
+      <InputField label="Cidade" value={value.city} onChange={next => onChange('city', next)} placeholder="Juiz de Fora" required/>
+      <div className="col-span-2">
+        <InputField label="Complemento (opcional)" value={value.complement} onChange={next => onChange('complement', next)} placeholder="Apto 201, bloco B"/>
+      </div>
+    </div>
   )
 }
 
@@ -193,7 +241,15 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
   const [organization, setOrganization] = useState<ApiOrganization | null>(null)
   const [organizationError, setOrganizationError] = useState('')
   const [branchId, setBranchId] = useState('')
-  const [pickupLocationId, setPickupLocationId] = useState('')
+  const [pickupAddressSource, setPickupAddressSource] = useState<{ type: 'branch' | 'customer' | 'company'; id?: string } | null>(null)
+  const [deliveryAddressSource, setDeliveryAddressSource] = useState<{ type: 'branch' | 'customer' | 'company'; id?: string } | null>(null)
+  const [addressSearch, setAddressSearch] = useState('')
+  const [addressSuggestions, setAddressSuggestions] = useState<ApiPickupAddressSuggestion[]>([])
+  const [addressSearchLoading, setAddressSearchLoading] = useState(false)
+  const [addressSearchError, setAddressSearchError] = useState('')
+  const [selectedPickupSuggestion, setSelectedPickupSuggestion] = useState<ApiPickupAddressSuggestion | null>(null)
+  const [selectedDeliverySuggestion, setSelectedDeliverySuggestion] = useState<ApiPickupAddressSuggestion | null>(null)
+  const [manualAddressStep, setManualAddressStep] = useState<number | null>(companyOrderMode ? null : 1)
   const [costCenterId, setCostCenterId] = useState('')
   const [coordinates, setCoordinates] = useState<{ pickup?: { latitude: number; longitude: number }; delivery?: { latitude: number; longitude: number } }>({})
   const [cepLookup, setCepLookup] = useState<{ pickupLoading: boolean; deliveryLoading: boolean; pickupError: string; deliveryError: string }>({
@@ -205,43 +261,72 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
 
   const setPickupField = (field: keyof AddressForm) => (v: string) => {
     const addressField = field !== 'name' && field !== 'phone'
-    const leavingSavedLocation = addressField && Boolean(pickupLocationId)
-    if (addressField) setPickupLocationId('')
+    if (addressField) {
+      setPickupAddressSource(null)
+      setSelectedPickupSuggestion(null)
+      setCoordinates(current => ({ ...current, pickup: undefined }))
+    }
     setPickup(p => ({
       ...p,
       [field]: v,
-      ...(leavingSavedLocation ? { state: 'MG' } : {}),
     }))
   }
-  const setDropoffField = (field: keyof AddressForm) => (v: string) =>
-    setDropoff(p => ({ ...p, [field]: v }))
-
-  const savedPickupLocations = organization?.branches.filter(branch => {
-    const address = branch.address
-    return branch.isActive && address?.rua && address.numero && address.bairro && address.cidade && address.estado
-  }) ?? []
-  const choosePickupLocation = (id: string) => {
-    setPickupLocationId(id)
-    if (!id) {
-      setPickup(current => ({ ...current, state: 'MG' }))
-      return
+  const setDropoffField = (field: keyof AddressForm) => (v: string) => {
+    if (field !== 'name' && field !== 'phone') {
+      setDeliveryAddressSource(null)
+      setSelectedDeliverySuggestion(null)
+      setCoordinates(current => ({ ...current, delivery: undefined }))
     }
-    const address = organization?.branches.find(branch => branch.id === id)?.address
-    if (!address?.rua || !address.numero || !address.bairro || !address.cidade || !address.estado) return
-    setPickup(current => ({
-      ...current,
-      cep: address.cep ? formatCep(address.cep) : '',
-      street: address.rua!,
-      number: address.numero!,
-      neighborhood: address.bairro!,
-      complement: address.complemento ?? '',
-      city: address.cidade!,
-      state: address.estado!,
-    }))
+    setDropoff(p => ({ ...p, [field]: v }))
   }
 
-  const step1Valid = pickup.name && isValidPhone(pickup.phone) && isValidOptionalCep(pickup.cep) && pickup.street && pickup.number && pickup.neighborhood && pickup.city
-  const step2Valid = dropoff.name && isValidPhone(dropoff.phone) && isValidOptionalCep(dropoff.cep) && dropoff.street && dropoff.number && dropoff.neighborhood && dropoff.city
+  const chooseAddressSuggestion = (suggestion: ApiPickupAddressSuggestion) => {
+    const source = {
+      type: suggestion.source,
+      ...(suggestion.source !== 'company' ? { id: suggestion.id } : {}),
+    } as const
+    const address = {
+      cep: suggestion.address.cep ? formatCep(suggestion.address.cep) : '',
+      street: suggestion.address.rua,
+      number: suggestion.address.numero,
+      neighborhood: suggestion.address.bairro,
+      complement: suggestion.address.complemento ?? '',
+      city: suggestion.address.cidade || 'Juiz de Fora',
+      state: suggestion.address.estado || 'MG',
+    }
+
+    if (step === 1) {
+      setPickupAddressSource(source)
+      setSelectedPickupSuggestion(suggestion)
+      setPickup(current => ({ ...current, ...address }))
+      setCoordinates(current => ({ ...current, pickup: suggestion.address.coordinates }))
+    } else {
+      setDeliveryAddressSource(source)
+      setSelectedDeliverySuggestion(suggestion)
+      setDropoff(current => ({ ...current, ...address, name: current.name || suggestion.name }))
+      setCoordinates(current => ({ ...current, delivery: suggestion.address.coordinates }))
+    }
+    setManualAddressStep(null)
+    setAddressSearch('')
+    setAddressSuggestions([])
+    setAddressSearchError('')
+  }
+
+  const editAddress = (targetStep: 1 | 2) => {
+    setManualAddressStep(targetStep)
+    if (targetStep === 1) {
+      setPickupAddressSource(null)
+      setSelectedPickupSuggestion(null)
+      setCoordinates(current => ({ ...current, pickup: undefined }))
+    } else {
+      setDeliveryAddressSource(null)
+      setSelectedDeliverySuggestion(null)
+      setCoordinates(current => ({ ...current, delivery: undefined }))
+    }
+  }
+
+  const step1Valid = Boolean(pickup.name.trim() && isValidPhone(pickup.phone) && isValidOptionalCep(pickup.cep) && pickup.street.trim() && pickup.number.trim() && pickup.neighborhood.trim() && pickup.city.trim())
+  const step2Valid = Boolean(dropoff.name.trim() && isValidPhone(dropoff.phone) && isValidOptionalCep(dropoff.cep) && dropoff.street.trim() && dropoff.number.trim() && dropoff.neighborhood.trim() && dropoff.city.trim())
   const pickupAddress = { cep: pickup.cep.replace(/\D/g, ''), rua: pickup.street, numero: pickup.number, bairro: pickup.neighborhood, complemento: pickup.complement, cidade: pickup.city, estado: pickup.state, coordinates: coordinates.pickup }
   const deliveryAddress = { cep: dropoff.cep.replace(/\D/g, ''), rua: dropoff.street, numero: dropoff.number, bairro: dropoff.neighborhood, complemento: dropoff.complement, cidade: dropoff.city, estado: 'MG', coordinates: coordinates.delivery }
 
@@ -256,7 +341,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
   }, [])
 
   useEffect(() => {
-    if (pickupLocationId) {
+    if (pickupAddressSource) {
       setCepLookup(current => ({ ...current, pickupLoading: false, pickupError: '' }))
       return
     }
@@ -286,9 +371,13 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
         if (active) setCepLookup(current => ({ ...current, pickupLoading: false }))
       })
     return () => { active = false }
-  }, [pickup.cep, pickupLocationId])
+  }, [pickup.cep, pickupAddressSource])
 
   useEffect(() => {
+    if (deliveryAddressSource) {
+      setCepLookup(current => ({ ...current, deliveryLoading: false, deliveryError: '' }))
+      return
+    }
     if (!dropoff.cep || !/^\d{8}$/.test(dropoff.cep.replace(/\D/g, ''))) {
       setCepLookup(current => ({ ...current, deliveryLoading: false, deliveryError: '' }))
       return
@@ -315,7 +404,7 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
         if (active) setCepLookup(current => ({ ...current, deliveryLoading: false }))
       })
     return () => { active = false }
-  }, [dropoff.cep])
+  }, [dropoff.cep, deliveryAddressSource])
 
   useEffect(() => {
     if (!companyOrderMode || !token) return
@@ -323,6 +412,42 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
       .then(result => setOrganization(result.organization))
       .catch(error => setOrganizationError(error instanceof Error ? error.message : 'Não foi possível carregar filiais e centros de custo.'))
   }, [companyOrderMode, token])
+
+  useEffect(() => {
+    const query = addressSearch.trim()
+    if (!companyOrderMode || !token || step > 2 || query.length < 2) {
+      setAddressSuggestions([])
+      setAddressSearchLoading(false)
+      setAddressSearchError('')
+      return
+    }
+
+    setAddressSuggestions([])
+    setAddressSearchLoading(false)
+    let active = true
+    const timer = setTimeout(() => {
+      setAddressSearchLoading(true)
+      setAddressSearchError('')
+      searchCompanyPickupAddresses(token, query)
+        .then(result => {
+          if (active) setAddressSuggestions(result.suggestions)
+        })
+        .catch(error => {
+          if (active) {
+            setAddressSearchError(error instanceof Error ? error.message : 'Não foi possível pesquisar os endereços.')
+            setAddressSuggestions([])
+          }
+        })
+        .finally(() => {
+          if (active) setAddressSearchLoading(false)
+        })
+    }, 300)
+
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [addressSearch, companyOrderMode, step, token])
 
   useEffect(() => {
     if (!pickup.neighborhood.trim() || !dropoff.neighborhood.trim()) {
@@ -362,13 +487,17 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
     let active = true
     const timer = setTimeout(async () => {
       const [pickupPoint, deliveryPoint] = await Promise.all([
-        pickup.street && pickup.neighborhood ? geocodeAddress({ ...newStructuredAddress(), rua: pickup.street, numero: pickup.number, bairro: pickup.neighborhood }) : undefined,
-        dropoff.street && dropoff.neighborhood ? geocodeAddress({ ...newStructuredAddress(), rua: dropoff.street, numero: dropoff.number, bairro: dropoff.neighborhood }) : undefined,
+        pickupAddressSource
+          ? coordinates.pickup
+          : pickup.street && pickup.neighborhood ? geocodeAddress({ ...newStructuredAddress(), rua: pickup.street, numero: pickup.number, bairro: pickup.neighborhood }) : undefined,
+        deliveryAddressSource
+          ? coordinates.delivery
+          : dropoff.street && dropoff.neighborhood ? geocodeAddress({ ...newStructuredAddress(), rua: dropoff.street, numero: dropoff.number, bairro: dropoff.neighborhood }) : undefined,
       ])
       if (active) setCoordinates({ pickup: pickupPoint, delivery: deliveryPoint })
     }, 700)
     return () => { active = false; clearTimeout(timer) }
-  }, [pickup.street, pickup.number, pickup.neighborhood, dropoff.street, dropoff.number, dropoff.neighborhood])
+  }, [pickup.street, pickup.number, pickup.neighborhood, dropoff.street, dropoff.number, dropoff.neighborhood, pickupAddressSource, deliveryAddressSource])
 
   const handleSubmit = async () => {
     setSaving(true)
@@ -384,7 +513,24 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
         requesterPhone: pickup.phone,
         notes: observations,
         ...(branchId ? { branchId } : {}),
-        ...(pickupLocationId ? { pickupLocationId } : {}),
+        ...(pickupAddressSource?.type === 'branch' && pickupAddressSource.id
+          ? { pickupLocationId: pickupAddressSource.id }
+          : {}),
+        ...(pickupAddressSource?.type === 'customer' && pickupAddressSource.id
+          ? { pickupCustomerId: pickupAddressSource.id }
+          : {}),
+        ...(pickupAddressSource?.type === 'company'
+          ? { pickupCompanyAddress: true }
+          : {}),
+        ...(deliveryAddressSource?.type === 'branch' && deliveryAddressSource.id
+          ? { deliveryLocationId: deliveryAddressSource.id }
+          : {}),
+        ...(deliveryAddressSource?.type === 'customer' && deliveryAddressSource.id
+          ? { deliveryCustomerId: deliveryAddressSource.id }
+          : {}),
+        ...(deliveryAddressSource?.type === 'company'
+          ? { deliveryCompanyAddress: true }
+          : {}),
         ...(costCenterId ? { costCenterId } : {}),
       }, token)
       setOrderResult(created)
@@ -430,7 +576,24 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
           {!orderResult?.whatsapp?.fallbackUrl && supportPhone && orderResult?.whatsapp?.status !== 'sent' && <a href={`tel:${supportPhone.replace(/[^\d+]/g, '')}`} className="mb-4 block text-sm font-semibold text-[#0c225a]">Fale com a Procópio Express: {supportPhone}</a>}
           {onGoToDashboard && token && <button onClick={onGoToDashboard} className="mb-3 w-full min-h-12 rounded-xl border border-[#e5eaf0] text-[#0f3266] text-sm font-700">Voltar ao painel</button>}
           <button
-            onClick={() => { setSubmitted(false); setStep(1); setPickup({ ...emptyAddress(), city: pickup.city }); setDropoff({ ...emptyAddress(), city: dropoff.city }); setObservations(''); setOrderResult(null) }}
+            onClick={() => {
+              setSubmitted(false)
+              setStep(1)
+              setPickup({ ...emptyAddress(), city: pickup.city })
+              setDropoff({ ...emptyAddress(), city: dropoff.city })
+              setObservations('')
+              setOrderResult(null)
+              setPickupAddressSource(null)
+              setDeliveryAddressSource(null)
+              setSelectedPickupSuggestion(null)
+              setSelectedDeliverySuggestion(null)
+              setAddressSearch('')
+              setAddressSearchError('')
+              setAddressSearchLoading(false)
+              setAddressSuggestions([])
+              setManualAddressStep(companyOrderMode ? null : 1)
+              setCoordinates({})
+            }}
             className="w-full min-h-12 rounded-xl bg-[#0f3266] text-white text-sm font-700 hover:bg-[#17447f] transition-colors"
           >
             Nova Solicitação
@@ -496,60 +659,91 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
         <div className="w-full max-w-5xl">
           {/* Step 1 — Coleta */}
           {step === 1 && (
-            <div className="grid lg:grid-cols-2 gap-6 animate-fade-in-up">
+            <section className="mx-auto grid max-w-3xl gap-4 animate-fade-in-up">
               <div className="bg-white rounded-2xl shadow-sm border border-[#e5eaf0] p-4 sm:p-6 flex flex-col gap-4 sm:gap-5">
                 <div className="flex items-center gap-3 pb-2 border-b border-[#f1f5f9]">
                   <div className="w-9 h-9 rounded-xl bg-[#fff5eb] flex items-center justify-center">
                     <MapPin size={18} className="text-[#f47b20]"/>
                   </div>
                   <div>
-                    <h2 className="text-base font-700 text-[#0c225a]">Ponto de Coleta</h2>
-                    <p className="text-xs text-[#94a3b8]">Onde buscar o pacote?</p>
+                    <h1 className="text-2xl font-800 text-[#0c225a]">De onde vamos buscar?</h1>
+                    <p className="mt-1 text-sm text-[#718096]">Informe o local de retirada da sua entrega.</p>
                   </div>
                 </div>
 
                 {companyOrderMode && (
-                  <label className="block text-xs font-semibold text-[#64748b]">
-                    De onde vamos retirar o pedido?
-                    <select
-                      value={pickupLocationId}
-                      onChange={event => choosePickupLocation(event.target.value)}
-                      className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-sm text-[#0f172a]"
-                    >
-                      <option value="">Informar outro endereço</option>
-                      {savedPickupLocations.length > 0 && (
-                        <optgroup label="Selecionar endereço salvo">
-                          {savedPickupLocations.map(location => (
-                            <option key={location.id} value={location.id}>{location.name}</option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
-                    {savedPickupLocations.length === 0 && (
-                      <span className="mt-1 block font-normal text-[#94a3b8]">
-                        Nenhum endereço de coleta salvo está disponível.
-                      </span>
+                  <div className="relative">
+                    <label htmlFor="pickup-address-search" className="mb-1.5 block text-xs font-semibold text-[#64748b]">
+                      Endereço de retirada
+                    </label>
+                    <input
+                      id="pickup-address-search"
+                      value={addressSearch}
+                      onChange={event => setAddressSearch(event.target.value)}
+                      placeholder="Digite o nome do cliente ou endereço..."
+                      autoComplete="off"
+                      maxLength={80}
+                      aria-autocomplete="list"
+                      aria-expanded={addressSuggestions.length > 0}
+                      aria-controls="pickup-address-suggestions"
+                      className="mt-1 h-11 w-full rounded-xl border border-[#d8e1eb] bg-white px-4 text-sm text-[#102a43] placeholder:text-[#8a9aab] focus:border-[#39b5ee] focus:outline-none focus:ring-4 focus:ring-[#39b5ee]/10"
+                    />
+                    {addressSearchLoading && <p className="mt-1 text-xs text-[#718096]">Buscando endereços…</p>}
+                    {addressSearchError && <p role="alert" className="mt-1 text-xs text-red-600">{addressSearchError}</p>}
+                    {!addressSearchLoading && !addressSearchError && addressSearch.trim().length >= 2 && addressSuggestions.length === 0 && (
+                      <p className="mt-1 text-[10px] text-[#718096]">Nenhum endereço encontrado. Você pode preencher manualmente.</p>
                     )}
-                  </label>
+                    {addressSuggestions.length > 0 && step === 1 && (
+                      <ul id="pickup-address-suggestions" className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-[#d8e1eb] bg-white py-1 shadow-lg">
+                        {addressSuggestions.map(suggestion => (
+                          <li key={`${suggestion.source}:${suggestion.id}`}>
+                            <button
+                              type="button"
+                              onClick={() => chooseAddressSuggestion(suggestion)}
+                              className="w-full px-3 py-2.5 text-left hover:bg-[#f4f8fc] focus:bg-[#f4f8fc] focus:outline-none"
+                            >
+                              <span className="block text-xs font-semibold text-[#0f3266]">
+                                {suggestion.name}{suggestion.unitName ? ` — ${suggestion.unitName}` : ''}
+                              </span>
+                              <span className="mt-0.5 block text-[10px] text-[#64748b]">
+                                {suggestion.address.rua}, {suggestion.address.numero} · {suggestion.address.bairro}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                  <div className="col-span-2">
-                    <InputField label="Nome do Solicitante" value={pickup.name} onChange={setPickupField('name')} placeholder="João Silva" icon={User} required/>
+                {selectedPickupSuggestion && manualAddressStep !== 1 ? (
+                  <div className="rounded-2xl border border-[#dce8f4] bg-[#f7fafd] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 gap-3">
+                        <MapPin size={18} className="mt-0.5 shrink-0 text-[#f47b20]"/>
+                        <div>
+                          <p className="text-sm font-bold text-[#0f3266]">{selectedPickupSuggestion.name}{selectedPickupSuggestion.unitName ? ` · ${selectedPickupSuggestion.unitName}` : ''}</p>
+                          <p className="mt-1 text-xs leading-relaxed text-[#64748b]">{pickup.street}, {pickup.number}{pickup.complement ? `, ${pickup.complement}` : ''} · {pickup.neighborhood}, {pickup.city}</p>
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => editAddress(1)} className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[#0f3266] hover:underline">
+                        <Pencil size={13}/> Alterar endereço
+                      </button>
+                    </div>
                   </div>
-                  <div className="col-span-2">
-                    <InputField label="Telefone" value={pickup.phone} onChange={v => setPickupField('phone')(formatPhone(v))} placeholder="(32) 99999-0000" icon={Phone} required/>
+                ) : manualAddressStep === 1 ? (
+                  <div className="rounded-2xl border border-[#e5eaf0] bg-[#fbfcfe] p-4">
+                    <AddressFields value={pickup} onChange={(field, value) => setPickupField(field)(value)} cepLoading={cepLookup.pickupLoading} cepError={cepLookup.pickupError}/>
                   </div>
-                  <InputField label="CEP (opcional)" value={pickup.cep} onChange={v => setPickupField('cep')(formatCep(v))} placeholder="36000-000" helperText={cepLookup.pickupLoading ? 'Consultando CEP…' : undefined} error={cepLookup.pickupError || (pickup.cep && !isValidOptionalCep(pickup.cep) ? 'Informe os 8 dígitos ou deixe em branco.' : undefined)}/>
-                  <InputField label="Número" value={pickup.number} onChange={setPickupField('number')} placeholder="123" icon={Home} required/>
-                  <div className="col-span-2">
-                    <InputField label="Rua / Avenida" value={pickup.street} onChange={setPickupField('street')} placeholder="Rua Halfeld" required/>
-                  </div>
-                  <InputField label="Bairro" value={pickup.neighborhood} onChange={setPickupField('neighborhood')} placeholder="Centro" required/>
-                  <InputField label="Cidade" value={pickup.city} onChange={setPickupField('city')} placeholder="Juiz de Fora" required/>
-                  <div className="col-span-2">
-                    <InputField label="Complemento" value={pickup.complement} onChange={setPickupField('complement')} placeholder="Apto 201, Bloco B"/>
-                  </div>
+                ) : (
+                  <button type="button" onClick={() => setManualAddressStep(1)} className="text-left text-xs font-semibold text-[#0f3266] underline decoration-[#bfd1e5] underline-offset-4">
+                    Não encontrou? Informar endereço manualmente.
+                  </button>
+                )}
+
+                <div className="grid gap-3 border-t border-[#f1f5f9] pt-5 sm:grid-cols-2">
+                  <InputField label="Nome do solicitante" value={pickup.name} onChange={setPickupField('name')} placeholder="Seu nome" icon={User} required/>
+                  <InputField label="Telefone" value={pickup.phone} onChange={value => setPickupField('phone')(formatPhone(value))} placeholder="(32) 99999-0000" icon={Phone} inputMode="tel" required error={pickup.phone && !isValidPhone(pickup.phone) ? 'Informe um telefone com DDD.' : undefined}/>
                 </div>
 
                 <button
@@ -557,77 +751,122 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
                   onClick={() => setStep(2)}
                   className="mt-auto w-full min-h-12 rounded-xl text-sm font-700 flex items-center justify-center gap-2 transition-all enabled:bg-[#ff7a18] enabled:hover:bg-[#e7650b] enabled:text-white enabled:shadow-md enabled:shadow-[#ff7a18]/20 disabled:cursor-not-allowed disabled:border disabled:border-[#e5eaf0] disabled:bg-[#eef2f6] disabled:text-[#64748b]"
                 >
-                  Próximo: Destino <ChevronRight size={16}/>
+                  Continuar para o destino <ArrowRight size={16}/>
                 </button>
               </div>
 
-              <ResponsiveDeliveryMap pickup={coordinates.pickup} delivery={coordinates.delivery} className="h-[400px] lg:h-auto lg:min-h-[500px]"/>
-            </div>
+              <ResponsiveDeliveryMap pickup={coordinates.pickup} delivery={coordinates.delivery}/>
+            </section>
           )}
 
           {/* Step 2 — Destino */}
           {step === 2 && (
-            <div className="grid lg:grid-cols-2 gap-6 animate-fade-in-up">
+            <section className="mx-auto grid max-w-3xl gap-4 animate-fade-in-up">
               <div className="bg-white rounded-2xl shadow-sm border border-[#e5eaf0] p-4 sm:p-6 flex flex-col gap-4 sm:gap-5">
                 <div className="flex items-center gap-3 pb-2 border-b border-[#f1f5f9]">
                   <div className="w-9 h-9 rounded-xl bg-[#f0f5ff] flex items-center justify-center">
                     <Navigation size={18} className="text-[#0c225a]"/>
                   </div>
                   <div>
-                    <h2 className="text-base font-700 text-[#0c225a]">Destino da Entrega</h2>
-                    <p className="text-xs text-[#94a3b8]">Onde entregar o pacote?</p>
+                    <h1 className="text-2xl font-800 text-[#0c225a]">Para onde vamos entregar?</h1>
+                    <p className="mt-1 text-sm text-[#718096]">Informe o endereço de destino.</p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                  <div className="col-span-2">
-                    <InputField label="Nome do Destinatário" value={dropoff.name} onChange={setDropoffField('name')} placeholder="Maria Souza" icon={User} required/>
+                {companyOrderMode && (
+                  <div className="relative">
+                    <label htmlFor="delivery-address-search" className="mb-1.5 block text-xs font-semibold text-[#64748b]">Buscar cliente, empresa ou endereço</label>
+                    <input
+                      id="delivery-address-search"
+                      value={addressSearch}
+                      onChange={event => setAddressSearch(event.target.value)}
+                      placeholder="Digite o nome do cliente ou endereço..."
+                      autoComplete="off"
+                      maxLength={80}
+                      aria-autocomplete="list"
+                      aria-expanded={addressSuggestions.length > 0}
+                      aria-controls="delivery-address-suggestions"
+                      className="h-12 w-full rounded-xl border border-[#d8e1eb] bg-white px-4 text-sm text-[#102a43] placeholder:text-[#8a9aab] focus:border-[#39b5ee] focus:outline-none focus:ring-4 focus:ring-[#39b5ee]/10"
+                    />
+                    {addressSearchLoading && <p className="mt-2 text-xs text-[#718096]">Buscando endereços…</p>}
+                    {addressSearchError && <p role="alert" className="mt-2 text-xs text-red-600">{addressSearchError}</p>}
+                    {!addressSearchLoading && !addressSearchError && addressSearch.trim().length >= 2 && addressSuggestions.length === 0 && step === 2 && (
+                      <p className="mt-2 text-xs text-[#718096]">Nenhum endereço encontrado. Você pode informar manualmente.</p>
+                    )}
+                    {addressSuggestions.length > 0 && step === 2 && (
+                      <ul id="delivery-address-suggestions" className="absolute z-20 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border border-[#d8e1eb] bg-white py-1 shadow-xl">
+                        {addressSuggestions.map(suggestion => (
+                          <li key={`${suggestion.source}:${suggestion.id}`}>
+                            <button type="button" onClick={() => chooseAddressSuggestion(suggestion)} className="w-full px-4 py-3 text-left transition-colors hover:bg-[#f4f8fc] focus:bg-[#f4f8fc] focus:outline-none">
+                              <span className="block text-sm font-bold text-[#0f3266]">{suggestion.name}{suggestion.unitName ? ` · ${suggestion.unitName}` : ''}</span>
+                              <span className="mt-1 block text-xs text-[#64748b]">{suggestion.address.rua}, {suggestion.address.numero} · {suggestion.address.bairro}{suggestion.address.cidade ? `, ${suggestion.address.cidade}` : ''}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
-                  <div className="col-span-2">
-                    <InputField label="Telefone" value={dropoff.phone} onChange={v => setDropoffField('phone')(formatPhone(v))} placeholder="(32) 98888-0000" icon={Phone} required/>
+                )}
+
+                {selectedDeliverySuggestion && manualAddressStep !== 2 ? (
+                  <div className="rounded-2xl border border-[#dce8f4] bg-[#f7fafd] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 gap-3">
+                        <MapPin size={18} className="mt-0.5 shrink-0 text-[#f47b20]"/>
+                        <div>
+                          <p className="text-sm font-bold text-[#0f3266]">{selectedDeliverySuggestion.name}{selectedDeliverySuggestion.unitName ? ` · ${selectedDeliverySuggestion.unitName}` : ''}</p>
+                          <p className="mt-1 text-xs leading-relaxed text-[#64748b]">{dropoff.street}, {dropoff.number}{dropoff.complement ? `, ${dropoff.complement}` : ''} · {dropoff.neighborhood}, {dropoff.city}</p>
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => editAddress(2)} className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[#0f3266] hover:underline">
+                        <Pencil size={13}/> Alterar endereço
+                      </button>
+                    </div>
                   </div>
-                  <InputField label="CEP (opcional)" value={dropoff.cep} onChange={v => setDropoffField('cep')(formatCep(v))} placeholder="36010-000" helperText={cepLookup.deliveryLoading ? 'Consultando CEP…' : undefined} error={cepLookup.deliveryError || (dropoff.cep && !isValidOptionalCep(dropoff.cep) ? 'Informe os 8 dígitos ou deixe em branco.' : undefined)}/>
-                  <InputField label="Número" value={dropoff.number} onChange={setDropoffField('number')} placeholder="456" icon={Home} required/>
-                  <div className="col-span-2">
-                    <InputField label="Rua / Avenida" value={dropoff.street} onChange={setDropoffField('street')} placeholder="Av. Rio Branco" required/>
+                ) : manualAddressStep === 2 ? (
+                  <div className="rounded-2xl border border-[#e5eaf0] bg-[#fbfcfe] p-4">
+                    <AddressFields value={dropoff} onChange={(field, value) => setDropoffField(field)(value)} cepLoading={cepLookup.deliveryLoading} cepError={cepLookup.deliveryError}/>
                   </div>
-                  <InputField label="Bairro" value={dropoff.neighborhood} onChange={setDropoffField('neighborhood')} placeholder="Benfica" required/>
-                  <InputField label="Cidade" value={dropoff.city} onChange={setDropoffField('city')} placeholder="Juiz de Fora" required/>
-                  <div className="col-span-2">
-                    <InputField label="Complemento" value={dropoff.complement} onChange={setDropoffField('complement')} placeholder="Sala 10"/>
-                  </div>
+                ) : (
+                  <button type="button" onClick={() => setManualAddressStep(2)} className="text-left text-xs font-semibold text-[#0f3266] underline decoration-[#bfd1e5] underline-offset-4">
+                    Não encontrou? Informar endereço manualmente.
+                  </button>
+                )}
+
+                <div className="grid gap-3 border-t border-[#f1f5f9] pt-5 sm:grid-cols-2">
+                  <InputField label="Nome do destinatário" value={dropoff.name} onChange={setDropoffField('name')} placeholder="Nome de quem recebe" icon={User} required/>
+                  <InputField label="Telefone do destinatário" value={dropoff.phone} onChange={value => setDropoffField('phone')(formatPhone(value))} placeholder="(32) 98888-0000" icon={Phone} inputMode="tel" required error={dropoff.phone && !isValidPhone(dropoff.phone) ? 'Informe um telefone com DDD.' : undefined}/>
                 </div>
 
                 <div className="flex gap-3 mt-auto">
                   <button
-                    onClick={() => setStep(1)}
+                    onClick={() => { setStep(1); setAddressSearch(''); setAddressSuggestions([]) }}
                     className="min-h-12 px-5 rounded-xl text-sm font-600 border border-[#e5eaf0] text-[#52657f] hover:bg-[#f7f9fc] transition-colors flex items-center gap-1.5"
                   >
-                    <ChevronLeft size={15}/> Voltar
+                    <ArrowLeft size={15}/> Voltar
                   </button>
                   <button
                     disabled={!step2Valid}
-                    onClick={() => setStep(3)}
+                    onClick={() => { setStep(3); setAddressSearch(''); setAddressSuggestions([]) }}
                     className="flex-1 min-h-12 rounded-xl text-sm font-700 flex items-center justify-center gap-2 transition-all enabled:bg-[#0f3266] enabled:hover:bg-[#17447f] enabled:text-white disabled:cursor-not-allowed disabled:border disabled:border-[#e5eaf0] disabled:bg-[#eef2f6] disabled:text-[#64748b]"
                   >
-                    Ver Resumo <ChevronRight size={16}/>
+                    Continuar para o resumo <ArrowRight size={16}/>
                   </button>
                 </div>
               </div>
 
-              <ResponsiveDeliveryMap pickup={coordinates.pickup} delivery={coordinates.delivery} className="h-[400px] lg:h-auto lg:min-h-[500px]"/>
-            </div>
+              <ResponsiveDeliveryMap pickup={coordinates.pickup} delivery={coordinates.delivery}/>
+            </section>
           )}
 
           {/* Step 3 — Resumo */}
           {step === 3 && (
-            <div className="grid lg:grid-cols-5 gap-6 animate-fade-in-up">
-              {/* Left: summary */}
-              <div className="lg:col-span-3 flex flex-col gap-4">
+            <section className="mx-auto grid max-w-3xl gap-4 animate-fade-in-up">
+              <div className="flex flex-col gap-4">
                 {/* Price card */}
                 <div className="bg-gradient-to-br from-[#0c225a] to-[#163690] rounded-2xl p-6 text-white">
                   <div className="flex items-center justify-between mb-4">
-                    <span className="text-sm font-500 text-white/70">Valor da rota</span>
+                    <span className="text-sm font-500 uppercase tracking-wide text-white/70">Valor total da entrega</span>
                     <span className="text-xs font-500 bg-white/15 px-2.5 py-1 rounded-full">{pricingLoading ? 'Consultando...' : pricingError ? 'Preço indisponível' : pricingResult?.success ? pricingResult.priceTable ?? 'Valor sob consulta' : 'Consultar valor'}</span>
                   </div>
                   <div className={`font-800 text-[#f47b20] ${pricingResult?.success && pricingResult.pricingType === 'RANGE' ? 'text-2xl' : 'text-4xl'}`}>{priceLabel}</div>
@@ -636,9 +875,12 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
 
                 {/* Pickup summary */}
                 <div className="bg-white rounded-2xl border border-[#e2e8f0] p-5 shadow-sm">
-                  <div className="flex items-center gap-2 mb-3">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
                     <div className="w-6 h-6 rounded-full bg-[#f47b20] text-white text-xs font-700 flex items-center justify-center">A</div>
-                    <span className="text-sm font-700 text-[#0c225a]">Coleta</span>
+                    <span className="text-sm font-700 text-[#0c225a]">Retirada</span>
+                    </div>
+                    <button type="button" onClick={() => setStep(1)} className="inline-flex items-center gap-1 text-xs font-semibold text-[#0f3266] hover:underline"><Pencil size={13}/> Editar retirada</button>
                   </div>
                   <SummaryRow label="Solicitante" value={pickup.name}/>
                   <SummaryRow label="Telefone" value={pickup.phone}/>
@@ -650,9 +892,12 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
 
                 {/* Dropoff summary */}
                 <div className="bg-white rounded-2xl border border-[#e2e8f0] p-5 shadow-sm">
-                  <div className="flex items-center gap-2 mb-3">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
                     <div className="w-6 h-6 rounded-full bg-[#0c225a] text-white text-xs font-700 flex items-center justify-center">B</div>
                     <span className="text-sm font-700 text-[#0c225a]">Entrega</span>
+                    </div>
+                    <button type="button" onClick={() => setStep(2)} className="inline-flex items-center gap-1 text-xs font-semibold text-[#0f3266] hover:underline"><Pencil size={13}/> Editar destino</button>
                   </div>
                   <SummaryRow label="Destinatário" value={dropoff.name}/>
                   <SummaryRow label="Telefone" value={dropoff.phone}/>
@@ -697,26 +942,25 @@ export default function PublicPortal({ onGoToLogin, token, companyOrderMode = fa
 
                 <div className="flex gap-3">
                   <button
-                    onClick={() => setStep(2)}
+                    onClick={() => { setStep(2); setAddressSearch(''); setAddressSuggestions([]) }}
                     className="h-12 px-5 rounded-xl text-sm font-600 border border-[#e2e8f0] text-[#64748b] hover:bg-[#f4f6fa] transition-colors flex items-center gap-1.5"
                   >
-                    <ChevronLeft size={15}/> Voltar
+                    <ArrowLeft size={15}/> Voltar
                   </button>
                   <button
                     onClick={handleSubmit}
-                    disabled={saving || pricingLoading || !pricingResult?.success || !pickup.name || !pickup.phone || !dropoff.name || !dropoff.phone}
-                    className="flex-1 h-12 rounded-xl text-sm font-700 flex items-center justify-center gap-2.5 bg-[#25D366] hover:bg-[#1ebe5b] text-white transition-all shadow-lg shadow-green-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={saving || pricingLoading || !pricingResult?.success || !step1Valid || !step2Valid}
+                    className="flex-1 min-h-12 rounded-xl text-sm font-700 flex items-center justify-center gap-2.5 bg-[#ff7a18] hover:bg-[#e7650b] text-white transition-all shadow-lg shadow-[#ff7a18]/20 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <MessageCircle size={17}/>
-                    {saving ? 'Registrando pedido...' : 'Finalizar e enviar pedido'}
+                    <Check size={17}/>
+                    {saving ? 'Registrando pedido...' : 'CONFIRMAR SOLICITAÇÃO'}
                   </button>
                 </div>
                 {saveError && <p className="text-sm text-red-600" role="alert">{saveError}</p>}
               </div>
 
-              {/* Right: map */}
-              <ResponsiveDeliveryMap pickup={coordinates.pickup} delivery={coordinates.delivery} className="lg:col-span-2 h-[400px] lg:h-full min-h-[500px]"/>
-            </div>
+              <ResponsiveDeliveryMap pickup={coordinates.pickup} delivery={coordinates.delivery}/>
+            </section>
           )}
         </div>
       </main>

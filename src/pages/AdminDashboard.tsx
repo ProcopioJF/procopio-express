@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 
 import {
   Activity,
@@ -12,6 +12,7 @@ import {
   Package,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Plus,
   RefreshCw,
   Route,
@@ -23,6 +24,8 @@ import {
 } from "lucide-react"
 
 import DashboardChartsPanel from "../components/DashboardChartsPanel"
+
+import OrderStatusHistory from "../components/OrderStatusHistory"
 
 import IntelligencePanel from "../components/IntelligencePanel"
 
@@ -46,6 +49,7 @@ import {
   getSettings,
   saveSettings,
   updateOrderStatus,
+  updateAdminCompany,
   ORDER_STATUS_LABELS,
   type ApiCompany,
   type ApiDashboardSummary,
@@ -93,13 +97,13 @@ const NAV: Array<{
 ]
 
 const EMPTY_SUMMARY: ApiDashboardSummary = {
-  today: { orders: 0, total: 0, average: 0 },
+  today: { orders: 0, pricedOrders: 0, total: 0, average: 0 },
 
-  week: { orders: 0, total: 0, average: 0 },
+  week: { orders: 0, pricedOrders: 0, total: 0, average: 0 },
 
-  month: { orders: 0, total: 0, average: 0 },
+  month: { orders: 0, pricedOrders: 0, total: 0, average: 0 },
 
-  allTime: { orders: 0, total: 0, average: 0 },
+  allTime: { orders: 0, pricedOrders: 0, total: 0, average: 0 },
 
   statusCounts: {
     PENDING: 0,
@@ -139,6 +143,9 @@ const EMPTY_SETTINGS: ApiSettings = {
 
 const money = (value: number) =>
   `R$ ${value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+const registeredMoney = (period: ApiDashboardSummary["today"]) =>
+  period.pricedOrders > 0 ? money(period.total) : "—"
 
 const address = (
   street?: string | null,
@@ -347,6 +354,9 @@ function OrderTable({
                 >
                   {ORDER_STATUS_LABELS[order.status]}
                 </span>
+                <div className="mt-2">
+                  <OrderStatusHistory history={order.history} />
+                </div>
               </td>
               <td className="px-4 py-3 text-[#64748b]">
                 {order.companyId ? "Empresarial" : "Avulso"}
@@ -415,6 +425,9 @@ function OrderTable({
               >
                 {ORDER_STATUS_LABELS[order.status]}
               </span>
+            </div>
+            <div className="mt-3 border-t border-[#eef2f6] pt-3">
+              <OrderStatusHistory history={order.history} />
             </div>
             <div className="mt-3 space-y-2 border-t border-[#eef2f6] pt-3 text-xs">
               <div className="flex justify-between gap-3">
@@ -514,11 +527,29 @@ export default function AdminDashboard({
 
   const [companies, setCompanies] = useState<ApiCompany[]>([])
 
+  const [selectedCompanyId, setSelectedCompanyId] = useState("")
+  const selectedCompanyIdRef = useRef(selectedCompanyId)
+  selectedCompanyIdRef.current = selectedCompanyId
+  const orderRequestIdRef = useRef(0)
+
+  const [editingCompanyId, setEditingCompanyId] = useState("")
+
+  const [companyEditForm, setCompanyEditForm] = useState({
+    name: "",
+    document: "",
+    email: "",
+    phone: "",
+  })
+
   const [priceTables, setPriceTables] = useState<ApiPriceTable[]>([])
 
   const [summary, setSummary] = useState(EMPTY_SUMMARY)
 
   const [charts, setCharts] = useState(EMPTY_CHARTS)
+
+  const [overviewLoading, setOverviewLoading] = useState(true)
+
+  const [overviewRefreshKey, setOverviewRefreshKey] = useState(0)
 
   const [settings, setSettings] = useState(EMPTY_SETTINGS)
 
@@ -552,6 +583,7 @@ export default function AdminDashboard({
   })
 
   const refresh = useCallback(async () => {
+    const orderRequestId = ++orderRequestIdRef.current
     setLoading(true)
 
     setError("")
@@ -559,18 +591,14 @@ export default function AdminDashboard({
     try {
       const [
         orderResult,
-        summaryResult,
-        chartsResult,
         companyResult,
         priceTableResult,
         settingsResult,
         systemUserResult,
       ] = await Promise.all([
-        getPanelOrders(token, "admin"),
-
-        getDashboardSummary(token),
-
-        getDashboardCharts(token),
+        getPanelOrders(token, "admin", {
+          companyId: selectedCompanyIdRef.current || undefined,
+        }),
 
         getAdminCompanies(token),
 
@@ -581,13 +609,10 @@ export default function AdminDashboard({
         getAdminSystemUsers(token),
       ])
 
-      setOrders(orderResult.orders)
-
-      if (orderResult.pagination) setOrderPagination(orderResult.pagination)
-
-      setSummary(summaryResult.summary)
-
-      setCharts(chartsResult.charts)
+      if (orderRequestId === orderRequestIdRef.current) {
+        setOrders(orderResult.orders)
+        if (orderResult.pagination) setOrderPagination(orderResult.pagination)
+      }
 
       setCompanies(companyResult.companies)
 
@@ -601,13 +626,15 @@ export default function AdminDashboard({
         ),
       )
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Não foi possível carregar o painel.",
-      )
+      if (orderRequestId === orderRequestIdRef.current) {
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Não foi possível carregar o painel.",
+        )
+      }
     } finally {
-      setLoading(false)
+      if (orderRequestId === orderRequestIdRef.current) setLoading(false)
     }
   }, [token])
 
@@ -615,9 +642,74 @@ export default function AdminDashboard({
     void refresh()
   }, [refresh])
 
+  useEffect(() => {
+    let active = true
+    setSummary(EMPTY_SUMMARY)
+    setCharts(EMPTY_CHARTS)
+    setOverviewLoading(true)
+    Promise.all([
+      getDashboardSummary(token, selectedCompanyId || undefined),
+      getDashboardCharts(token, selectedCompanyId || undefined),
+    ])
+      .then(([summaryResult, chartResult]) => {
+        if (!active) return
+        setSummary(summaryResult.summary)
+        setCharts(chartResult.charts)
+      })
+      .catch((cause: unknown) => {
+        if (!active) return
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Não foi possível carregar o resumo da operação.",
+        )
+      })
+      .finally(() => {
+        if (active) setOverviewLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [overviewRefreshKey, selectedCompanyId, token])
+
   const filteredOrders = orders
 
-  const loadOrderPage = async (page: number) => {
+  const submitCompanyEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!editingCompanyId) return
+    setSaving(true)
+    setError("")
+    setNotice("")
+    try {
+      const { company } = await updateAdminCompany(
+        token,
+        editingCompanyId,
+        companyEditForm,
+      )
+      setCompanies((current) =>
+        current.map((item) =>
+          item.id === company.id ? { ...item, ...company } : item,
+        ),
+      )
+      setNotice(`Cadastro de ${company.name} atualizado.`)
+      setEditingCompanyId("")
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Não foi possível atualizar o cadastro da empresa.",
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const loadOrderPage = async (
+    page: number,
+    companyId = orderCompanyId,
+  ) => {
+    const orderRequestId = ++orderRequestIdRef.current
+    setOrders([])
     setLoading(true)
     setError("")
     try {
@@ -626,13 +718,15 @@ export default function AdminDashboard({
         pageSize: 25,
         search: search.trim(),
         status: orderStatus || undefined,
-        companyId: orderCompanyId || undefined,
+        companyId: companyId || undefined,
         from: orderFrom || undefined,
         to: orderTo || undefined,
       })
+      if (orderRequestId !== orderRequestIdRef.current) return
       setOrders(result.orders)
       if (result.pagination) setOrderPagination(result.pagination)
     } catch (cause) {
+      if (orderRequestId !== orderRequestIdRef.current) return
       setError(
         cause instanceof Error
           ? cause.message
@@ -662,16 +756,7 @@ export default function AdminDashboard({
         `Pedido #${order.publicId}: ${ORDER_STATUS_LABELS[nextStep.status]}.`,
       )
       await loadOrderPage(orderPagination.page)
-      try {
-        const result = await getDashboardSummary(token)
-        setSummary(result.summary)
-      } catch (cause) {
-        setError(
-          `O status foi atualizado, mas o resumo não pôde ser atualizado: ${
-            cause instanceof Error ? cause.message : "erro desconhecido"
-          }`,
-        )
-      }
+      setOverviewRefreshKey((current) => current + 1)
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -714,15 +799,28 @@ export default function AdminDashboard({
     NAV.find((item) => item.id === section)?.label ?? "Centro de Controle"
 
   const activeRoutes = priceTables.filter((table) => table.active).length
+  const selectedCompany = companies.find(
+    (company) => company.id === selectedCompanyId,
+  )
+  const selectCompanyContext = (companyId: string) => {
+    setSelectedCompanyId(companyId)
+    setOrderCompanyId(companyId)
+    setSummary(EMPTY_SUMMARY)
+    setCharts(EMPTY_CHARTS)
+    setOverviewLoading(true)
+    setOrders([])
+    if (section === "orders") void loadOrderPage(1, companyId)
+  }
 
   const exportOrders = async () => {
     setError("")
+    const exportCompanyId = selectedCompanyIdRef.current
     try {
       const query = {
         pageSize: 100,
         search: search.trim(),
         status: orderStatus || undefined,
-        companyId: orderCompanyId || undefined,
+        companyId: exportCompanyId || undefined,
         from: orderFrom || undefined,
         to: orderTo || undefined,
       }
@@ -739,6 +837,11 @@ export default function AdminDashboard({
         const result = await getPanelOrders(token, "admin", { ...query, page })
         exportRows.push(...result.orders)
       }
+      if (exportCompanyId !== selectedCompanyIdRef.current) {
+        throw new Error(
+          "A empresa selecionada mudou durante a exportação. Tente novamente.",
+        )
+      }
       const rows = [
         [
           "Número",
@@ -750,6 +853,8 @@ export default function AdminDashboard({
           "Coleta",
           "Entrega",
           "Valor",
+          "Status",
+          "Histórico de status",
           "Tipo",
         ],
 
@@ -779,6 +884,17 @@ export default function AdminDashboard({
           ),
 
           formatOrderPrice(order),
+
+          ORDER_STATUS_LABELS[order.status],
+
+          (order.history ?? [])
+            .map(
+              (event) =>
+                `${ORDER_STATUS_LABELS[event.status]} — ${new Date(
+                  event.createdAt,
+                ).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
+            )
+            .join(" | "),
 
           order.companyId ? "Empresarial" : "Avulso",
         ]),
@@ -896,6 +1012,9 @@ export default function AdminDashboard({
               title={sidebarOpen ? undefined : label}
               onClick={() => {
                 setSection(id)
+                if (id === "orders") {
+                  void loadOrderPage(1, selectedCompanyId)
+                }
                 setMobileMenuOpen(false)
               }}
               aria-current={section === id ? "page" : undefined}
@@ -981,6 +1100,22 @@ export default function AdminDashboard({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <label className="sr-only" htmlFor="admin-company-scope">
+              Empresa em análise
+            </label>
+            <select
+              id="admin-company-scope"
+              value={selectedCompanyId}
+              onChange={(event) => selectCompanyContext(event.target.value)}
+              className="h-9 max-w-36 rounded-xl border border-[#e8edf4] bg-white px-2 text-[10px] font-semibold text-[#52657f] sm:max-w-56 sm:px-3 sm:text-xs"
+            >
+              <option value="">Visão global</option>
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name}
+                </option>
+              ))}
+            </select>
             <label className="relative hidden w-48 md:block xl:w-64">
               <Search
                 size={14}
@@ -994,7 +1129,13 @@ export default function AdminDashboard({
               />
             </label>
             <button
-              onClick={() => void refresh()}
+              onClick={() => {
+                void refresh()
+                if (section === "orders") {
+                  void loadOrderPage(orderPagination.page)
+                }
+                setOverviewRefreshKey((current) => current + 1)
+              }}
               aria-label="Atualizar dados"
               className="grid h-9 w-9 place-items-center rounded-xl border border-[#e8edf4] text-[#718096] hover:bg-[#f8fafc]"
             >
@@ -1044,16 +1185,25 @@ export default function AdminDashboard({
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#f47b20]">
-                    Administração central · {settings.operationCity}
+                    {selectedCompany
+                      ? `Operação de ${selectedCompany.name}`
+                      : `Administração central · ${settings.operationCity}`}
                   </p>
                   <h2 className="mt-1 text-xl font-extrabold text-[#102b55]">
                     Olá, {user.name.split(" ")[0]}.
                   </h2>
                 </div>
                 <span className="rounded-lg border border-[#e8edf4] bg-white px-3 py-2 text-[10px] text-[#718096]">
-                  Atualizado em {new Date().toLocaleDateString("pt-BR")}
+                  {overviewLoading
+                    ? "Atualizando indicadores…"
+                    : `Atualizado em ${new Date().toLocaleDateString("pt-BR")}`}
                 </span>
               </div>
+              {overviewLoading && (
+                <p role="status" className="text-xs text-[#718096]">
+                  Carregando indicadores e gráficos…
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <MetricCard
                   label="Total de empresas"
@@ -1077,39 +1227,43 @@ export default function AdminDashboard({
                   tone="bg-[#fff3e9] text-[#e97820]"
                 />
                 <MetricCard
-                  label="Total de entregas"
+                  label="Total de pedidos"
                   value={summary.allTime.orders.toLocaleString("pt-BR")}
-                  detail="Histórico geral"
+                  detail={selectedCompany ? "Histórico da empresa" : "Histórico geral"}
                   icon={Package}
                   tone="bg-[#f1edff] text-[#785cc2]"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <MetricCard
-                  label="Entregas hoje"
+                  label="Pedidos registrados hoje"
                   value={`${summary.today.orders}`}
-                  detail="Todas as empresas"
+                  detail={selectedCompany?.name ?? "Todas as empresas"}
                   icon={Activity}
                   tone="bg-[#edf5ff] text-[#3778c2]"
                 />
                 <MetricCard
-                  label="Faturamento hoje"
-                  value={money(summary.today.total)}
-                  detail={`${summary.today.orders} pedidos`}
+                  label="Valores registrados hoje"
+                  value={registeredMoney(summary.today)}
+                  detail={`${summary.today.pricedOrders} com valor · ${summary.today.orders} pedidos`}
                   icon={CircleDollarSign}
                   tone="bg-[#eff9f2] text-[#3d9a62]"
                 />
                 <MetricCard
-                  label="Faturamento mês"
-                  value={money(summary.month.total)}
-                  detail={`${summary.month.orders} pedidos`}
+                  label="Valores registrados no mês"
+                  value={registeredMoney(summary.month)}
+                  detail={`${summary.month.pricedOrders} com valor · ${summary.month.orders} pedidos`}
                   icon={CircleDollarSign}
                   tone="bg-[#fff3e9] text-[#e97820]"
                 />
                 <MetricCard
-                  label="Ticket médio global"
-                  value={money(summary.allTime.average)}
-                  detail="Por entrega registrada"
+                  label={selectedCompany ? "Ticket médio da empresa" : "Ticket médio global"}
+                  value={
+                    summary.allTime.pricedOrders > 0
+                      ? money(summary.allTime.average)
+                      : "—"
+                  }
+                  detail="Média dos pedidos com valor registrado"
                   icon={ChartNoAxesCombined}
                   tone="bg-[#f1edff] text-[#785cc2]"
                 />
@@ -1124,7 +1278,7 @@ export default function AdminDashboard({
                     summary.statusCounts.PICKED_UP +
                     summary.statusCounts.IN_TRANSIT
                   ).toLocaleString("pt-BR")}
-                  detail="Todas as empresas"
+                  detail={selectedCompany?.name ?? "Todas as empresas"}
                   icon={Activity}
                   tone="bg-[#edf5ff] text-[#3778c2]"
                 />
@@ -1134,31 +1288,34 @@ export default function AdminDashboard({
                     summary.statusCounts.FINALIZED +
                     summary.statusCounts.DELIVERED
                   ).toLocaleString("pt-BR")}
-                  detail="Finalizadas ou entregues"
+                  detail={selectedCompany?.name ?? "Finalizadas ou entregues"}
                   icon={Package}
                   tone="bg-[#eff9f2] text-[#3d9a62]"
                 />
                 <MetricCard
                   label="Entregas canceladas"
                   value={summary.statusCounts.CANCELLED.toLocaleString("pt-BR")}
-                  detail="Todas as empresas"
+                  detail={selectedCompany?.name ?? "Todas as empresas"}
                   icon={Package}
                   tone="bg-[#fff3e9] text-[#e97820]"
                 />
               </div>
               <DashboardChartsPanel
                 data={charts}
-                key="admin-dashboard-charts"
+                key={`admin-dashboard-charts-${selectedCompanyId}`}
                 audience="admin"
+                companyScoped={Boolean(selectedCompanyId)}
               />
             </div>
           )}
 
           {section === "intelligence" && (
             <IntelligencePanel
+              key={`admin-intelligence-${selectedCompanyId || "global"}`}
               token={token}
-              companyName={settings.companyName}
+              companyName={selectedCompany?.name ?? settings.companyName}
               audience="admin"
+              companyId={selectedCompanyId || undefined}
             />
           )}
 
@@ -1169,9 +1326,59 @@ export default function AdminDashboard({
                   Empresas cadastradas
                 </h2>
                 <p className="mt-1 text-xs text-[#8795a8]">
-                  Contas empresariais vinculadas à plataforma.
+                  Contas empresariais vinculadas à plataforma. Selecione uma
+                  para consultar sua operação.
                 </p>
               </div>
+              {editingCompanyId && (
+                <form
+                  onSubmit={submitCompanyEdit}
+                  className="grid gap-3 rounded-2xl border border-[#e8edf4] bg-white p-4 md:grid-cols-2"
+                >
+                  {(
+                    [
+                      ["name", "Nome empresarial"],
+                      ["document", "CNPJ ou documento"],
+                      ["email", "E-mail empresarial (não altera login)"],
+                      ["phone", "Telefone empresarial"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label
+                      key={key}
+                      className="block text-xs font-semibold text-[#64748b]"
+                    >
+                      {label}
+                      <input
+                        type={key === "email" ? "email" : "text"}
+                        value={companyEditForm[key]}
+                        onChange={(event) =>
+                          setCompanyEditForm((current) => ({
+                            ...current,
+                            [key]: event.target.value,
+                          }))
+                        }
+                        required={key === "name"}
+                        className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-sm font-normal text-[#102b55]"
+                      />
+                    </label>
+                  ))}
+                  <div className="flex items-end gap-2">
+                    <button
+                      disabled={saving}
+                      className="h-10 rounded-xl bg-[#0c225a] px-4 text-xs font-bold text-white disabled:opacity-50"
+                    >
+                      Salvar cadastro
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingCompanyId("")}
+                      className="h-10 rounded-xl border border-[#e2e8f0] px-4 text-xs font-bold text-[#52657f]"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </form>
+              )}
               <div className="overflow-x-auto rounded-2xl border border-[#e8edf4] bg-white">
                 <table className="w-full min-w-[920px] text-left">
                   <thead className="bg-[#f8fafc] text-[10px] uppercase tracking-wider text-[#7b8ba1]">
@@ -1184,6 +1391,7 @@ export default function AdminDashboard({
                         "MRR",
                         "Usuários",
                         "Status",
+                        "Ações",
                       ].map((label) => (
                         <th key={label} className="px-4 py-3">
                           {label}
@@ -1234,6 +1442,24 @@ export default function AdminDashboard({
                                 : "Sem contrato"}
                           </span>
                         </td>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            aria-label={`Editar cadastro de ${company.name}`}
+                            onClick={() => {
+                              setEditingCompanyId(company.id)
+                              setCompanyEditForm({
+                                name: company.name,
+                                document: company.document ?? "",
+                                email: company.email ?? "",
+                                phone: company.phone ?? "",
+                              })
+                            }}
+                            className="grid h-8 w-8 place-items-center rounded-lg border border-[#e8edf4] text-[#52657f] hover:border-[#f47b20] hover:text-[#c76216]"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1277,7 +1503,9 @@ export default function AdminDashboard({
                 />
                 <select
                   value={orderCompanyId}
-                  onChange={(event) => setOrderCompanyId(event.target.value)}
+                  onChange={(event) =>
+                    selectCompanyContext(event.target.value)
+                  }
                   className="h-10 min-w-0 rounded-xl border border-[#e2e8f0] bg-white px-3 text-xs"
                 >
                   <option value="">Todas as empresas</option>
@@ -1394,9 +1622,11 @@ export default function AdminDashboard({
 
           {section === "finance" && (
             <AdminBusinessPanel
+              key={`admin-finance-${selectedCompanyId || "global"}`}
               token={token}
               mode="finance"
               companies={companies}
+              companyId={selectedCompanyId || undefined}
             />
           )}
 

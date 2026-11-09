@@ -188,12 +188,16 @@ export default function AdminBusinessPanel({
   mode,
 
   companies = [],
+
+  companyId,
 }: {
   token: string
 
   mode: Mode
 
   companies?: ApiCompany[]
+
+  companyId?: string
 }) {
   const [loading, setLoading] = useState(true)
 
@@ -340,11 +344,12 @@ export default function AdminBusinessPanel({
               offset: 0,
               limit: FINANCIAL_ENTRY_PAGE_SIZE,
               ...appliedEntryFilters,
+              companyId,
             }),
 
-            getAdminSubscriptions(token),
+            getAdminSubscriptions(token, companyId),
 
-            getAdminFinancialSummary(token),
+            getAdminFinancialSummary(token, companyId),
           ])
 
         setEntries(entryResult.entries)
@@ -370,7 +375,7 @@ export default function AdminBusinessPanel({
     } finally {
       setLoading(false)
     }
-  }, [appliedEntryFilters, mode, token])
+  }, [appliedEntryFilters, companyId, mode, token])
 
   useEffect(() => {
     void refresh()
@@ -387,6 +392,7 @@ export default function AdminBusinessPanel({
         offset: entries.length,
         limit: FINANCIAL_ENTRY_PAGE_SIZE,
         ...appliedEntryFilters,
+        companyId,
       })
       setEntries((currentEntries) => [...currentEntries, ...result.entries])
       setEntryTotal(result.total)
@@ -605,7 +611,7 @@ export default function AdminBusinessPanel({
         createAdminFinancialEntry(token, {
           ...entryForm,
 
-          companyId: entryForm.companyId || null,
+          companyId: companyId ?? (entryForm.companyId || null),
 
           amount: Number(entryForm.amount),
 
@@ -1528,7 +1534,8 @@ export default function AdminBusinessPanel({
               <label className="block text-xs font-semibold text-[#64748b]">
                 Empresa (opcional)
                 <select
-                  value={entryForm.companyId}
+                  value={companyId ?? entryForm.companyId}
+                  disabled={Boolean(companyId)}
                   onChange={(event) =>
                     setEntryForm({
                       ...entryForm,
@@ -1537,7 +1544,7 @@ export default function AdminBusinessPanel({
                   }
                   className="mt-1 h-10 w-full rounded-xl border border-[#e2e8f0] bg-white px-3 text-sm"
                 >
-                  <option value="">Operação</option>
+                  {!companyId && <option value="">Operação</option>}
                   {companies.map((company) => (
                     <option key={company.id} value={company.id}>
                       {company.name}

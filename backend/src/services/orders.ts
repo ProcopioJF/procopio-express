@@ -2,8 +2,10 @@ import { OrderStatus, Prisma, type CompanyPermission } from "@prisma/client";
 import { prisma } from "../db.js";
 import { HttpError } from "../middleware/errors.js";
 import {
+  addressSchema,
   companyBranchPickupAddressSchema,
   createOrderSchema,
+  orderListQuerySchema,
 } from "../validation.js";
 import { getRoutePrice } from "./pricing.js";
 
@@ -30,12 +32,111 @@ export function summarizeOrderStatuses(
   return counts;
 }
 
+export const ADMIN_ORDER_STATUS_TRANSITIONS: Partial<
+  Record<OrderStatus, OrderStatus>
+> = {
+  PENDING: "CONFIRMED",
+  FINALIZED: "CONFIRMED",
+  CONFIRMED: "PICKED_UP",
+  ASSIGNED: "PICKED_UP",
+  PICKED_UP: "IN_TRANSIT",
+  IN_TRANSIT: "DELIVERED",
+};
+
+export const COURIER_ORDER_STATUS_TRANSITIONS: Partial<
+  Record<OrderStatus, OrderStatus>
+> = {
+  ASSIGNED: "PICKED_UP",
+  PICKED_UP: "IN_TRANSIT",
+  IN_TRANSIT: "DELIVERED",
+};
+
+export function orderCompanyScope(
+  options: { companyId?: string; allowCompanyFilter: boolean },
+  requestedCompanyId?: string,
+): Prisma.OrderWhereInput {
+  const companyId =
+    options.companyId ??
+    (options.allowCompanyFilter ? requestedCompanyId : undefined);
+  return companyId ? { companyId } : {};
+}
+
+export function buildOrderListQuery(
+  rawQuery: unknown,
+  options: { companyId?: string; allowCompanyFilter: boolean },
+) {
+  const query = orderListQuerySchema.parse(rawQuery);
+  const where: Prisma.OrderWhereInput = orderCompanyScope(
+    options,
+    query.companyId,
+  );
+  if (query.status === "COMPLETED") {
+    where.status = { in: ["FINALIZED", "DELIVERED"] };
+  } else if (query.status) {
+    where.status = query.status;
+  }
+  if (query.from || query.to) {
+    const dateFilter: Prisma.DateTimeFilter = {};
+    if (query.from) {
+      const start = new Date(`${query.from}T03:00:00.000Z`);
+      if (
+        Number.isNaN(start.getTime()) ||
+        start.toISOString().slice(0, 10) !== query.from
+      ) {
+        throw new HttpError(400, "Data inicial inválida.");
+      }
+      dateFilter.gte = start;
+    }
+    if (query.to) {
+      const end = new Date(`${query.to}T03:00:00.000Z`);
+      if (
+        Number.isNaN(end.getTime()) ||
+        end.toISOString().slice(0, 10) !== query.to
+      ) {
+        throw new HttpError(400, "Data final inválida.");
+      }
+      end.setUTCDate(end.getUTCDate() + 1);
+      dateFilter.lt = end;
+    }
+    where.createdAt = dateFilter;
+  }
+  if (query.search) {
+    where.OR = [
+      { publicId: { contains: query.search, mode: "insensitive" } },
+      { requesterName: { contains: query.search, mode: "insensitive" } },
+      { recipientName: { contains: query.search, mode: "insensitive" } },
+      { pickupNeighborhood: { contains: query.search, mode: "insensitive" } },
+      { deliveryNeighborhood: { contains: query.search, mode: "insensitive" } },
+    ];
+  }
+  return {
+    query,
+    where,
+    skip: (query.page - 1) * query.pageSize,
+    take: query.pageSize,
+  };
+}
+
 export async function createOrder(input: unknown, createdById?: string, companyId?: string) {
   const data = createOrderSchema.parse(input);
-  const { pickupLocationId, ...orderData } = data;
+  const {
+    pickupLocationId,
+    pickupCustomerId,
+    pickupCompanyAddress,
+    deliveryLocationId,
+    deliveryCustomerId,
+    deliveryCompanyAddress,
+    ...orderData
+  } = data;
   let p = data.pickupAddress;
-  const d = data.deliveryAddress;
-  if (pickupLocationId && !companyId) {
+  let d = data.deliveryAddress;
+  const hasSavedPickupSource = Boolean(
+    pickupLocationId || pickupCustomerId || pickupCompanyAddress,
+  );
+  const hasSavedDeliverySource = Boolean(
+    deliveryLocationId || deliveryCustomerId || deliveryCompanyAddress,
+  );
+  if ((hasSavedPickupSource || hasSavedDeliverySource) && !companyId) {
     throw new HttpError(400, "Endereços salvos só podem ser usados em pedidos empresariais.");
   }
   if (pickupLocationId && companyId) {
@@ -51,6 +152,96 @@ export async function createOrder(input: unknown, createdById?: string, companyI
       throw new HttpError(422, "O endereço salvo não possui os campos necessários para criar o pedido.");
     }
     p = { ...savedAddress.data, coordinates: data.pickupAddress.coordinates };
+  }
+  if (pickupCustomerId && companyId) {
+    const savedCustomer = await prisma.customer.findFirst({
+      where: { id: pickupCustomerId, companyId },
+      select: { address: true },
+    });
+    if (!savedCustomer) {
+      throw new HttpError(404, "Endereço de cliente não encontrado nesta empresa.");
+    }
+    const savedAddress = addressSchema.safeParse(savedCustomer.address);
+    if (!savedAddress.success) {
+      throw new HttpError(422, "O cliente salvo não possui os campos necessários para criar o pedido.");
+    }
+    p = {
+      ...savedAddress.data,
+      cidade: savedAddress.data.cidade || p.cidade,
+      estado: savedAddress.data.estado || p.estado,
+      coordinates: savedAddress.data.coordinates ?? data.pickupAddress.coordinates,
+    };
+  }
+  if (deliveryLocationId && companyId) {
+    const savedLocation = await prisma.companyBranch.findFirst({
+      where: { id: deliveryLocationId, companyId, isActive: true },
+      select: { address: true },
+    });
+    if (!savedLocation) {
+      throw new HttpError(404, "Endereço de destino não encontrado ou inativo nesta empresa.");
+    }
+    const savedAddress = companyBranchPickupAddressSchema.safeParse(savedLocation.address);
+    if (!savedAddress.success) {
+      throw new HttpError(422, "O endereço de destino salvo não possui os campos necessários.");
+    }
+    d = { ...savedAddress.data, coordinates: data.deliveryAddress.coordinates };
+  }
+  if (deliveryCustomerId && companyId) {
+    const savedCustomer = await prisma.customer.findFirst({
+      where: { id: deliveryCustomerId, companyId },
+      select: { address: true },
+    });
+    if (!savedCustomer) {
+      throw new HttpError(404, "Endereço de destino não encontrado nesta empresa.");
+    }
+    const savedAddress = addressSchema.safeParse(savedCustomer.address);
+    if (!savedAddress.success) {
+      throw new HttpError(422, "O cliente salvo não possui os campos necessários para criar o destino.");
+    }
+    d = {
+      ...savedAddress.data,
+      cidade: savedAddress.data.cidade || d.cidade,
+      estado: savedAddress.data.estado || d.estado,
+      coordinates: savedAddress.data.coordinates ?? data.deliveryAddress.coordinates,
+    };
+  }
+  if (deliveryCompanyAddress && companyId) {
+    const company = await prisma.company.findUnique({
+      where: { id: companyId },
+      select: { address: true },
+    });
+    const companyAddress = company?.address && typeof company.address === "object" && !Array.isArray(company.address)
+      ? company.address.pickupAddress
+      : null;
+    const savedAddress = addressSchema.safeParse(companyAddress);
+    if (!savedAddress.success) {
+      throw new HttpError(422, "A empresa não possui um endereço de sede estruturado.");
+    }
+    d = {
+      ...savedAddress.data,
+      cidade: savedAddress.data.cidade || d.cidade,
+      estado: savedAddress.data.estado || d.estado,
+      coordinates: savedAddress.data.coordinates ?? data.deliveryAddress.coordinates,
+    };
+  }
+  if (pickupCompanyAddress && companyId) {
+    const company = await prisma.company.findUnique({
+      where: { id: companyId },
+      select: { address: true },
+    });
+    const companyAddress = company?.address && typeof company.address === "object" && !Array.isArray(company.address)
+      ? company.address.pickupAddress
+      : null;
+    const savedAddress = addressSchema.safeParse(companyAddress);
+    if (!savedAddress.success) {
+      throw new HttpError(422, "A empresa não possui um endereço de sede estruturado.");
+    }
+    p = {
+      ...savedAddress.data,
+      cidade: savedAddress.data.cidade || p.cidade,
+      estado: savedAddress.data.estado || p.estado,
+      coordinates: savedAddress.data.coordinates ?? data.pickupAddress.coordinates,
+    };
   }
   const city = p.cidade || "Juiz de Fora";
   if (d.cidade && d.cidade.localeCompare(city, "pt-BR", { sensitivity: "base" }) !== 0) {
@@ -70,17 +261,36 @@ export async function createOrder(input: unknown, createdById?: string, companyI
       })) {
         throw new HttpError(404, "Endereço de coleta não encontrado ou inativo nesta empresa.");
       }
+      if (pickupCustomerId && !await tx.customer.findFirst({
+        where: { id: pickupCustomerId, companyId },
+        select: { id: true },
+      })) {
+        throw new HttpError(404, "Endereço de cliente não encontrado nesta empresa.");
+      }
+      if (deliveryLocationId && !await tx.companyBranch.findFirst({
+        where: { id: deliveryLocationId, companyId, isActive: true },
+        select: { id: true },
+      })) {
+        throw new HttpError(404, "Endereço de destino não encontrado ou inativo nesta empresa.");
+      }
+      if (deliveryCustomerId && !await tx.customer.findFirst({
+        where: { id: deliveryCustomerId, companyId },
+        select: { id: true },
+      })) {
+        throw new HttpError(404, "Endereço de destino não encontrado nesta empresa.");
+      }
       if (data.branchId && !await tx.companyBranch.findFirst({ where: { id: data.branchId, companyId, isActive: true } })) {
         throw new HttpError(404, "Filial não encontrada ou inativa nesta empresa.");
       }
       if (data.costCenterId && !await tx.companyCostCenter.findFirst({ where: { id: data.costCenterId, companyId, isActive: true } })) {
         throw new HttpError(404, "Centro de custo não encontrado ou inativo nesta empresa.");
       }
-      let existing = data.customerId
-        ? await tx.customer.findFirst({ where: { id: data.customerId, companyId } })
+      const selectedCustomerId = deliveryCustomerId ?? data.customerId;
+      let existing = selectedCustomerId
+        ? await tx.customer.findFirst({ where: { id: selectedCustomerId, companyId } })
         : await tx.customer.findFirst({ where: { companyId, phone: data.recipientPhone } });
-      if (data.customerId && !existing) throw new HttpError(404, "Destinatário não encontrado nesta empresa.");
-      if (!data.customerId && !existing) {
+      if (selectedCustomerId && !existing) throw new HttpError(404, "Destinatário não encontrado nesta empresa.");
+      if (!selectedCustomerId && !existing) {
         const customers = await tx.customer.findMany({ where: { companyId }, select: { id: true, phone: true } });
         const match = customers.find(customer => customer.phone?.replace(/\D/g, "") === data.recipientPhone.replace(/\D/g, ""));
         existing = match ? await tx.customer.findUnique({ where: { id: match.id } }) : null;

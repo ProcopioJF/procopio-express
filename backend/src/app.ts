@@ -7,7 +7,7 @@ import { createAccessToken, hashPassword, publicUser, verifyPassword } from "./a
 import { bearerAuth, requireAuth } from "./middleware/auth.js";
 import { developmentActor } from "./middleware/placeholderAuth.js";
 import { errorHandler, HttpError, notFound } from "./middleware/errors.js";
-import { assertCompanyCanCreateOrder, createOrder, getPublicOrder, summarizeOrderStatuses } from "./services/orders.js";
+import { ADMIN_ORDER_STATUS_TRANSITIONS, assertCompanyCanCreateOrder, buildOrderListQuery, COURIER_ORDER_STATUS_TRANSITIONS, createOrder, getPublicOrder, summarizeOrderStatuses } from "./services/orders.js";
 import { notifyNewOrder } from "./services/whatsapp.js";
 import { processIncomingWebhook, verifyWebhookSignature } from "./services/whatsappWebhook.js";
 import { getRoutePrice } from "./services/pricing.js";
@@ -18,7 +18,7 @@ import {
 } from "./services/intelligence.js";
 import { getDashboardCharts } from "./services/dashboard-charts.js";
 import { adminRouter, companyRouter } from "./routes/management.js";
-import { adminOrderStatusSchema, changePasswordSchema, courierOrderStatusSchema, createCompanySchema, intelligenceQuestionSchema, loginSchema, orderCourierAssignmentSchema, orderListQuerySchema, pricingRouteQuerySchema, pricingRouteSchema, pricingSchema, settingsSchema, whatsappRequestStatusSchema } from "./validation.js";
+import { adminCompanyUpdateSchema, adminOrderStatusSchema, changePasswordSchema, courierOrderStatusSchema, createCompanySchema, dashboardCompanyScopeSchema, intelligenceRequestSchema, loginSchema, orderCourierAssignmentSchema, pricingRouteQuerySchema, pricingRouteSchema, pricingSchema, settingsSchema, whatsappRequestStatusSchema } from "./validation.js";
 
 export const app = express();
 const vercelOrigins = [process.env.VERCEL_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]
@@ -65,50 +65,17 @@ async function listOrders(
   rawQuery: unknown,
   options: { companyId?: string; allowCompanyFilter: boolean },
 ) {
-  const query = orderListQuerySchema.parse(rawQuery)
-  const where: Prisma.OrderWhereInput = {}
-  if (options.companyId) where.companyId = options.companyId
-  else if (options.allowCompanyFilter && query.companyId) where.companyId = query.companyId
-  if (query.status === "COMPLETED") where.status = { in: ["FINALIZED", "DELIVERED"] }
-  else if (query.status) where.status = query.status
-  if (query.from || query.to) {
-    const dateFilter: Prisma.DateTimeFilter = {}
-    if (query.from) {
-      const start = new Date(`${query.from}T03:00:00.000Z`)
-      if (Number.isNaN(start.getTime()) || start.toISOString().slice(0, 10) !== query.from) {
-        throw new HttpError(400, "Data inicial inválida.")
-      }
-      dateFilter.gte = start
-    }
-    if (query.to) {
-      const end = new Date(`${query.to}T03:00:00.000Z`)
-      if (Number.isNaN(end.getTime()) || end.toISOString().slice(0, 10) !== query.to) {
-        throw new HttpError(400, "Data final inválida.")
-      }
-      end.setUTCDate(end.getUTCDate() + 1)
-      dateFilter.lt = end
-    }
-    where.createdAt = dateFilter
-  }
-  if (query.search) {
-    where.OR = [
-      { publicId: { contains: query.search, mode: "insensitive" } },
-      { requesterName: { contains: query.search, mode: "insensitive" } },
-      { recipientName: { contains: query.search, mode: "insensitive" } },
-      { pickupNeighborhood: { contains: query.search, mode: "insensitive" } },
-      { deliveryNeighborhood: { contains: query.search, mode: "insensitive" } },
-    ]
-  }
-  const skip = (query.page - 1) * query.pageSize
+  const { query, where, skip, take } = buildOrderListQuery(rawQuery, options)
   const [orders, total] = await prisma.$transaction([
     prisma.order.findMany({
       where,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip,
-      take: query.pageSize,
+      take,
       include: {
         branch: { select: { name: true } },
         costCenter: { select: { name: true } },
+        history: { orderBy: { createdAt: "asc" } },
         ...(options.allowCompanyFilter
           ? { courier: { select: { id: true, user: { select: { name: true } } } } }
           : {}),
@@ -126,6 +93,22 @@ async function listOrders(
     },
   }
 }
+
+async function resolveDashboardCompanyId(
+  actor: NonNullable<express.Request["actor"]>,
+  rawQuery: unknown,
+) {
+  const requestedCompanyId = dashboardCompanyScopeSchema.parse(rawQuery).companyId;
+  if (actor.role === "COMPANY") return actor.companyId;
+  if (requestedCompanyId && !await prisma.company.findUnique({
+    where: { id: requestedCompanyId },
+    select: { id: true },
+  })) {
+    throw new HttpError(404, "Empresa não encontrada.");
+  }
+  return requestedCompanyId;
+}
+
 const requireCurrentUserIfAuthenticated: RequestHandler = (req, res, next) => {
   if (config.nodeEnv !== "production" && req.header("x-dev-role")) return next();
   if (!req.actor) return next();
@@ -239,6 +222,23 @@ api.get("/pricing/route", async (req, res, next) => {
 api.get("/pricing", async (req, res, next) => { try { const query = pricingSchema.parse(req.query); const zone = query.pricingZoneId ? await prisma.pricingZone.findUnique({ where: { id: query.pricingZoneId } }) : await prisma.pricingZone.findFirst({ where: { active: true } }); if (!zone) throw new HttpError(404, "Zona de preço não encontrada"); res.json({ zone: { id: zone.id, nome: zone.name }, price: zone.basePrice }); } catch (e) { next(e); } });
 api.get("/admin/orders", requireAuth, async (req, res, next) => { try { if (!req.actor || req.actor.role !== "ADMIN") throw new HttpError(403, "Acesso restrito"); res.json(await listOrders(req.query, { allowCompanyFilter: true })); } catch (e) { next(e); } });
 api.get("/admin/companies", requireAuth, async (req, res, next) => { try { if (!req.actor || req.actor.role !== "ADMIN") throw new HttpError(403, "Acesso restrito"); const companies = await prisma.company.findMany({ orderBy: { name: "asc" }, include: { _count: { select: { orders: true, users: true } } } }); res.json({ companies }); } catch (e) { next(e); } });
+api.patch("/admin/companies/:id", requireAuth, async (req, res, next) => {
+  try {
+    if (!req.actor || req.actor.role !== "ADMIN") throw new HttpError(403, "Acesso restrito");
+    const data = adminCompanyUpdateSchema.parse(req.body);
+    const company = await prisma.company.update({
+      where: { id: String(req.params.id) },
+      data: {
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(data.document !== undefined ? { document: data.document || null } : {}),
+        ...(data.phone !== undefined ? { phone: data.phone || null } : {}),
+        ...(data.email !== undefined ? { email: data.email || null } : {}),
+      },
+      include: { _count: { select: { orders: true, users: true } } },
+    });
+    res.json({ company });
+  } catch (e) { next(e); }
+});
 api.post("/admin/companies", requireAuth, async (req, res, next) => {
   try {
     if (!req.actor || req.actor.role !== "ADMIN") throw new HttpError(403, "Acesso restrito");
@@ -292,15 +292,21 @@ api.get("/dashboard/summary", requireAuth, async (req, res, next) => {
     const monthStart = new Date(Date.UTC(datePart("year"), datePart("month") - 1, 1, 3));
     const weekday = new Date(localMidnightUtc).getUTCDay();
     const weekStart = new Date(localMidnightUtc - ((weekday + 6) % 7) * 86400000);
-    const scope: Prisma.OrderWhereInput = req.actor.role === "COMPANY" ? { companyId: req.actor.companyId } : {};
+    const companyId = await resolveDashboardCompanyId(req.actor, req.query);
+    const scope: Prisma.OrderWhereInput = companyId ? { companyId } : {};
     const aggregateFor = async (from?: Date) => {
       const result = await prisma.order.aggregate({
         where: { ...scope, ...(from ? { createdAt: { gte: from, lte: now } } : {}) },
-        _count: { _all: true },
+        _count: { _all: true, price: true },
         _sum: { price: true },
         _avg: { price: true },
       });
-      return { orders: result._count._all, total: Number(result._sum.price ?? 0), average: Number(result._avg.price ?? 0) };
+      return {
+        orders: result._count._all,
+        pricedOrders: result._count.price,
+        total: Number(result._sum.price ?? 0),
+        average: Number(result._avg.price ?? 0),
+      };
     };
     const [today, week, month, allTime, statusRows] = await Promise.all([
       aggregateFor(dayStart),
@@ -326,7 +332,7 @@ api.get("/dashboard/charts", requireAuth, async (req, res, next) => {
   try {
     if (!req.actor || !["ADMIN", "COMPANY"].includes(req.actor.role)) throw new HttpError(403, "Acesso restrito");
     if (req.actor.role === "COMPANY" && !req.actor.companyId) throw new HttpError(403, "Empresa não identificada");
-    const companyId = req.actor.role === "COMPANY" ? req.actor.companyId : undefined;
+    const companyId = await resolveDashboardCompanyId(req.actor, req.query);
     res.json({ charts: await getDashboardCharts(companyId) });
   } catch (e) { next(e); }
 });
@@ -334,8 +340,17 @@ api.post("/intelligence/ask", requireAuth, async (req, res, next) => {
   try {
     const access = resolveIntelligenceScope(req.actor);
     if (!access.allowed) throw new HttpError(403, "Acesso restrito");
-    const { question } = intelligenceQuestionSchema.parse(req.body);
-    const metrics = await getIntelligenceMetrics(access.companyId);
+    const { question, companyId: requestedCompanyId } = intelligenceRequestSchema.parse(req.body);
+    const companyId = req.actor?.role === "ADMIN"
+      ? requestedCompanyId
+      : access.companyId;
+    if (req.actor?.role === "ADMIN" && companyId && !await prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true },
+    })) {
+      throw new HttpError(404, "Empresa não encontrada.");
+    }
+    const metrics = await getIntelligenceMetrics(companyId);
     res.json({ answer: answerIntelligenceQuestion(question, metrics), metrics });
   } catch (e) { next(e); }
 });
@@ -391,12 +406,7 @@ api.patch("/courier/orders/:id/status", requireAuth, async (req, res, next) => {
       })
       if (!order) throw new HttpError(404, "Pedido não encontrado para este motoboy")
 
-      const nextStatus: Record<string, string> = {
-        ASSIGNED: "PICKED_UP",
-        PICKED_UP: "IN_TRANSIT",
-        IN_TRANSIT: "DELIVERED",
-      }
-      if (nextStatus[order.status] !== status) {
+      if (COURIER_ORDER_STATUS_TRANSITIONS[order.status] !== status) {
         throw new HttpError(409, "Esta etapa não é permitida para o status atual do pedido")
       }
 
@@ -429,15 +439,6 @@ api.patch("/admin/orders/:id/status", requireAuth, async (req, res, next) => {
     if (!req.actor || req.actor.role !== "ADMIN") throw new HttpError(403, "Acesso restrito")
     const adminUserId = req.actor.id
     const { status } = adminOrderStatusSchema.parse(req.body)
-    const nextStatus: Partial<Record<OrderStatus, OrderStatus>> = {
-      PENDING: "CONFIRMED",
-      FINALIZED: "CONFIRMED",
-      CONFIRMED: "PICKED_UP",
-      ASSIGNED: "PICKED_UP",
-      PICKED_UP: "IN_TRANSIT",
-      IN_TRANSIT: "DELIVERED",
-    }
-
     const updated = await prisma.$transaction(async (tx) => {
       const orderId = String(req.params.id)
       const order = await tx.order.findUnique({
@@ -445,7 +446,7 @@ api.patch("/admin/orders/:id/status", requireAuth, async (req, res, next) => {
         select: { id: true, status: true },
       })
       if (!order) throw new HttpError(404, "Pedido não encontrado")
-      if (nextStatus[order.status] !== status) {
+      if (ADMIN_ORDER_STATUS_TRANSITIONS[order.status] !== status) {
         throw new HttpError(409, "Esta etapa não é permitida para o status atual do pedido")
       }
 

@@ -22,6 +22,8 @@ import {
 
 import DashboardChartsPanel from "../components/DashboardChartsPanel"
 
+import OrderStatusHistory from "../components/OrderStatusHistory"
+
 import IntelligencePanel from "../components/IntelligencePanel"
 
 import CompanyOrganizationPanel from "../components/CompanyOrganizationPanel"
@@ -35,7 +37,6 @@ import {
   getCompanySettings,
   getDashboardSummary,
   getPanelOrders,
-  saveCompanySettings,
   type ApiCompanySettings,
   type ApiDashboardSummary,
   type ApiDashboardCharts,
@@ -66,13 +67,13 @@ const NAV: Array<{
 ]
 
 const EMPTY_SUMMARY: ApiDashboardSummary = {
-  today: { orders: 0, total: 0, average: 0 },
+  today: { orders: 0, pricedOrders: 0, total: 0, average: 0 },
 
-  week: { orders: 0, total: 0, average: 0 },
+  week: { orders: 0, pricedOrders: 0, total: 0, average: 0 },
 
-  month: { orders: 0, total: 0, average: 0 },
+  month: { orders: 0, pricedOrders: 0, total: 0, average: 0 },
 
-  allTime: { orders: 0, total: 0, average: 0 },
+  allTime: { orders: 0, pricedOrders: 0, total: 0, average: 0 },
 
   statusCounts: {
     PENDING: 0,
@@ -110,6 +111,9 @@ const EMPTY_PROFILE: ApiCompanySettings = {
 
 const money = (value: number) =>
   `R$ ${value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+const registeredMoney = (period: ApiDashboardSummary["today"]) =>
+  period.pricedOrders > 0 ? money(period.total) : "—"
 
 const address = (
   street?: string | null,
@@ -241,6 +245,9 @@ function OrdersTable({ orders }: { orders: ApiOrder[] }) {
                 >
                   {ORDER_STATUS_LABELS[order.status]}
                 </span>
+                <div className="mt-2">
+                  <OrderStatusHistory history={order.history} />
+                </div>
               </td>
             </tr>
           ))}
@@ -321,6 +328,9 @@ function OrdersTable({ orders }: { orders: ApiOrder[] }) {
               {formatOrderPrice(order)}
             </strong>
           </div>
+          <div className="mt-3 border-t border-[#eef2f6] pt-3">
+            <OrderStatusHistory history={order.history} />
+          </div>
         </article>
       ))}
       {orders.length === 0 && (
@@ -382,8 +392,6 @@ export default function CompanyDashboard({
   })
 
   const [loading, setLoading] = useState(true)
-
-  const [saving, setSaving] = useState(false)
 
   const [error, setError] = useState("")
 
@@ -497,6 +505,7 @@ export default function CompanyDashboard({
           "Centro de custo",
           "Valor",
           "Status",
+          "Histórico de status",
         ],
 
         ...exportRows.map((order) => [
@@ -531,6 +540,15 @@ export default function CompanyDashboard({
           formatOrderPrice(order),
 
           order.status,
+
+          (order.history ?? [])
+            .map(
+              (event) =>
+                `${ORDER_STATUS_LABELS[event.status]} — ${new Date(
+                  event.createdAt,
+                ).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
+            )
+            .join(" | "),
         ]),
       ]
 
@@ -561,30 +579,6 @@ export default function CompanyDashboard({
           ? cause.message
           : "Não foi possível exportar os registros.",
       )
-    }
-  }
-
-  const saveProfile = async () => {
-    setSaving(true)
-
-    setError("")
-
-    setNotice("")
-
-    try {
-      const result = await saveCompanySettings(token, profile)
-
-      setProfile(result.settings)
-
-      setNotice("Perfil da empresa atualizado.")
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Não foi possível salvar o perfil.",
-      )
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -823,28 +817,28 @@ export default function CompanyDashboard({
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 <MetricCard
-                  label="Entregas hoje"
+                  label="Pedidos hoje"
                   value={`${summary.today.orders}`}
-                  detail={`Últimas 24h · ${money(summary.today.total)}`}
+                  detail={`Hoje · ${registeredMoney(summary.today)} em ${summary.today.pricedOrders} pedidos com valor`}
                   icon={Package}
                   tone="bg-[#fff3e9] text-[#e97820]"
                 />
                 <MetricCard
-                  label="Entregas semana"
+                  label="Pedidos na semana"
                   value={`${summary.week.orders}`}
-                  detail={`Esta semana · ${money(summary.week.total)}`}
+                  detail={`Esta semana · ${registeredMoney(summary.week)} em ${summary.week.pricedOrders} pedidos com valor`}
                   icon={BarChart3}
                   tone="bg-[#edf5ff] text-[#3778c2]"
                 />
                 <MetricCard
-                  label="Entregas mês"
+                  label="Pedidos no mês"
                   value={`${summary.month.orders}`}
-                  detail={`Mês atual · ${money(summary.month.total)}`}
+                  detail={`Mês atual · ${registeredMoney(summary.month)} em ${summary.month.pricedOrders} pedidos com valor`}
                   icon={Package}
                   tone="bg-[#eff9f2] text-[#3d9a62]"
                 />
                 <MetricCard
-                  label="Total de entregas"
+                  label="Total de pedidos"
                   value={summary.allTime.orders.toLocaleString("pt-BR")}
                   detail="Desde o início"
                   icon={LayoutDashboard}
@@ -852,8 +846,12 @@ export default function CompanyDashboard({
                 />
                 <MetricCard
                   label="Ticket médio"
-                  value={money(summary.allTime.average)}
-                  detail="Por entrega registrada"
+                  value={
+                    summary.allTime.pricedOrders > 0
+                      ? money(summary.allTime.average)
+                      : "—"
+                  }
+                  detail="Média dos pedidos com valor registrado"
                   icon={CircleDollarSign}
                   tone="bg-[#fff5e7] text-[#c88724]"
                 />
@@ -892,30 +890,30 @@ export default function CompanyDashboard({
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <MetricCard
-                  label="Valor dos pedidos hoje"
-                  value={money(summary.today.total)}
-                  detail={`${summary.today.orders} entregas`}
+                  label="Valores registrados hoje"
+                  value={registeredMoney(summary.today)}
+                  detail={`${summary.today.pricedOrders} pedidos com valor`}
                   icon={CircleDollarSign}
                   tone="bg-[#fff3e9] text-[#e97820]"
                 />
                 <MetricCard
-                  label="Valor dos pedidos na semana"
-                  value={money(summary.week.total)}
-                  detail={`${summary.week.orders} entregas`}
+                  label="Valores registrados na semana"
+                  value={registeredMoney(summary.week)}
+                  detail={`${summary.week.pricedOrders} pedidos com valor`}
                   icon={CircleDollarSign}
                   tone="bg-[#edf5ff] text-[#3778c2]"
                 />
                 <MetricCard
-                  label="Valor dos pedidos no mês"
-                  value={money(summary.month.total)}
-                  detail={`${summary.month.orders} entregas`}
+                  label="Valores registrados no mês"
+                  value={registeredMoney(summary.month)}
+                  detail={`${summary.month.pricedOrders} pedidos com valor`}
                   icon={CircleDollarSign}
                   tone="bg-[#eff9f2] text-[#3d9a62]"
                 />
                 <MetricCard
                   label="Valor registrado nos pedidos"
-                  value={money(summary.allTime.total)}
-                  detail="Histórico consolidado"
+                  value={registeredMoney(summary.allTime)}
+                  detail={`${summary.allTime.pricedOrders} pedidos com valor registrado`}
                   icon={CircleDollarSign}
                   tone="bg-[#f1edff] text-[#785cc2]"
                 />
@@ -1075,30 +1073,30 @@ export default function CompanyDashboard({
               </div>
               <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
                 <MetricCard
-                  label="Gasto hoje"
-                  value={money(summary.today.total)}
-                  detail={`${summary.today.orders} entregas`}
+                  label="Valores registrados hoje"
+                  value={registeredMoney(summary.today)}
+                  detail={`${summary.today.pricedOrders} pedidos com valor`}
                   icon={CircleDollarSign}
                   tone="bg-[#fff3e9] text-[#e97820]"
                 />
                 <MetricCard
-                  label="Gasto na semana"
-                  value={money(summary.week.total)}
-                  detail={`${summary.week.orders} entregas`}
+                  label="Valores registrados na semana"
+                  value={registeredMoney(summary.week)}
+                  detail={`${summary.week.pricedOrders} pedidos com valor`}
                   icon={CircleDollarSign}
                   tone="bg-[#edf5ff] text-[#3778c2]"
                 />
                 <MetricCard
-                  label="Gasto no mês"
-                  value={money(summary.month.total)}
-                  detail={`${summary.month.orders} entregas`}
+                  label="Valores registrados no mês"
+                  value={registeredMoney(summary.month)}
+                  detail={`${summary.month.pricedOrders} pedidos com valor`}
                   icon={CircleDollarSign}
                   tone="bg-[#eff9f2] text-[#3d9a62]"
                 />
                 <MetricCard
                   label="Total registrado"
-                  value={money(summary.allTime.total)}
-                  detail={`${summary.allTime.orders} pedidos · média de ${money(summary.allTime.average)} por pedido`}
+                  value={registeredMoney(summary.allTime)}
+                  detail={`${summary.allTime.pricedOrders} pedidos com valor · média ${money(summary.allTime.average)}`}
                   icon={CircleDollarSign}
                   tone="bg-[#f1edff] text-[#785cc2]"
                 />
@@ -1137,9 +1135,6 @@ export default function CompanyDashboard({
               token={token}
               user={user}
               profile={profile}
-              savingProfile={saving}
-              onProfileChange={setProfile}
-              onSaveProfile={() => void saveProfile()}
               onFeedback={handleOrganizationFeedback}
             />
           )}

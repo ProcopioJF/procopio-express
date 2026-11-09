@@ -22,7 +22,7 @@ const COMPANY_QUESTIONS = [
 
   "Qual é o melhor horário para pedir?",
 
-  "Como será o volume do próximo mês?",
+  "Como variou o volume nos últimos meses?",
 ]
 
 const ADMIN_QUESTIONS = [
@@ -43,22 +43,27 @@ export default function IntelligencePanel({
   token,
   companyName,
   audience = "company",
+  companyId,
 }: {
   token: string
   companyName: string
   audience?: "company" | "admin"
+  companyId?: string
 }) {
   const [question, setQuestion] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [answering, setAnswering] = useState(false)
   const [metrics, setMetrics] = useState<ApiIntelligenceMetrics | null>(null)
   const company = audience === "company"
-  const suggestions = company ? COMPANY_QUESTIONS : ADMIN_QUESTIONS
+  const scopedCompany = company || Boolean(companyId)
+  const suggestions = scopedCompany ? COMPANY_QUESTIONS : ADMIN_QUESTIONS
 
   useEffect(() => {
     let active = true
     setAnswering(true)
-    askIntelligence(token, "resumo geral")
+    setMetrics(null)
+    setMessages([])
+    askIntelligence(token, "resumo geral", company ? undefined : companyId)
       .then((result) => {
         if (!active) return
         setMetrics(result.metrics)
@@ -82,7 +87,7 @@ export default function IntelligencePanel({
     return () => {
       active = false
     }
-  }, [token])
+  }, [company, companyId, token])
 
   const submit = async (value = question) => {
     const prompt = value.trim()
@@ -91,7 +96,11 @@ export default function IntelligencePanel({
     setMessages((current) => [...current, { role: "user", text: prompt }])
     setAnswering(true)
     try {
-      const result = await askIntelligence(token, prompt)
+      const result = await askIntelligence(
+        token,
+        prompt,
+        company ? undefined : companyId,
+      )
       setMetrics(result.metrics)
       setMessages((current) => [
         ...current,
@@ -131,25 +140,25 @@ export default function IntelligencePanel({
                   </span>
                 </div>
                 <p className="mt-0.5 text-xs text-white/65">
-                  {company
-                    ? "Inteligência exclusiva da sua empresa"
+                  {scopedCompany
+                    ? `Análise exclusiva de ${companyName}`
                     : "Diagnóstico global da operação"}
                 </p>
               </div>
             </div>
             <p className="mt-4 text-sm leading-6 text-white/80">
-              {company
-                ? "Pergunte sobre pedidos, valores, quilômetros e bairros. A análise consulta todo o histórico da sua empresa no banco do app."
+              {scopedCompany
+                ? "Pergunte sobre pedidos, valores, quilômetros e bairros. A análise usa somente o histórico da empresa selecionada."
                 : "Pergunte sobre pedidos, valores, quilômetros, bairros e empresas usando o histórico consolidado do app."}
             </p>
           </div>
           <div className="flex max-w-xs items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-3 py-2.5 text-xs text-white/80">
-            {company ? <ShieldCheck size={16} /> : <Building2 size={16} />}
+            {scopedCompany ? <ShieldCheck size={16} /> : <Building2 size={16} />}
             <span>
               <b className="block text-[9px] uppercase tracking-wider text-white/55">
                 Escopo dos dados
               </b>
-              {company
+              {scopedCompany
                 ? `${companyName} apenas`
                 : "Todas as empresas cadastradas"}
             </span>
@@ -170,14 +179,14 @@ export default function IntelligencePanel({
           icon={<BrainCircuit size={16} />}
         />
         <SummaryCard
-          label={company ? "Maior concentração" : "Maior volume no mês"}
+          label={scopedCompany ? "Maior concentração" : "Maior volume no mês"}
           value={
-            company
+            scopedCompany
               ? (metrics?.topDeliveryNeighborhood?.name ?? "—")
               : (metrics?.topCompanyThisMonth?.name ?? "—")
           }
           detail={
-            company
+            scopedCompany
               ? metrics?.topDeliveryNeighborhood
                 ? `${metrics.topDeliveryNeighborhood.count} pedidos no histórico`
                 : "Sem dados de bairro"
@@ -267,7 +276,7 @@ export default function IntelligencePanel({
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
               placeholder={
-                company
+                scopedCompany
                   ? "Ex.: onde posso reduzir custos?"
                   : "Ex.: qual empresa mais pediu este mês?"
               }
@@ -319,7 +328,7 @@ export default function IntelligencePanel({
             <p className="mt-3 text-xs leading-5 text-[#6e5b4d]">
               {metrics?.highestAveragePriceNeighborhood
                 ? `${metrics.highestAveragePriceNeighborhood.name} tem o maior valor médio registrado (${money(metrics.highestAveragePriceNeighborhood.averagePrice)}). Use a concentração e o volume de pedidos para investigar as rotas; esse valor não representa, sozinho, custo operacional.`
-                : company
+                : scopedCompany
                   ? "Ainda não há valores e bairros suficientes para comparar rotas. Registre pedidos com preço e endereço para habilitar essa análise."
                   : metrics?.topCompanyThisMonth
                     ? `Revise o volume de ${metrics.topCompanyThisMonth.name}, empresa com mais pedidos registrados neste mês.`
